@@ -2,7 +2,8 @@ import torch
 from torch import Tensor
 from jaxtyping import Float
 from math import isqrt
-from e3nn.o3 import matrix_to_angles, wigner_D
+from e3nn.o3 import matrix_to_angles
+from e3nn.o3._wigner import so3_generators
 from einops import einsum
 import math
 import numpy as np
@@ -43,7 +44,7 @@ def rotate_sh(
     alpha, beta, gamma = matrix_to_angles(rotations)
     result = []
     for degree in range(isqrt(n)):
-        sh_rotations = wigner_D(degree, alpha, beta, gamma).type(dtype)
+        sh_rotations = _wigner_D_on_device(degree, alpha, beta, gamma, device, dtype)
         sh_rotated = einsum(
             sh_rotations,
             sh_coefficients[..., degree**2 : (degree + 1) ** 2],
@@ -52,6 +53,22 @@ def rotate_sh(
         result.append(sh_rotated)
 
     return torch.cat(result, dim=-1)
+
+
+def _wigner_D_on_device(
+    l: int,
+    alpha: torch.Tensor,
+    beta: torch.Tensor,
+    gamma: torch.Tensor,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    alpha, beta, gamma = torch.broadcast_tensors(alpha, beta, gamma)
+    alpha = alpha.to(device=device, dtype=dtype)[..., None, None] % (2 * math.pi)
+    beta = beta.to(device=device, dtype=dtype)[..., None, None] % (2 * math.pi)
+    gamma = gamma.to(device=device, dtype=dtype)[..., None, None] % (2 * math.pi)
+    X = so3_generators(l).to(device=device, dtype=dtype)
+    return torch.matrix_exp(alpha * X[1]) @ torch.matrix_exp(beta * X[0]) @ torch.matrix_exp(gamma * X[1])
 
 def focal2fov(focal, pixels):
     return 2*math.atan(pixels/(2*focal))

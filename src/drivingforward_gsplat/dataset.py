@@ -1,5 +1,7 @@
 import os
 import random
+import shutil
+import tempfile
 from functools import partial
 
 import cv2
@@ -579,8 +581,44 @@ class NuScenesdataset(Dataset):
 
         self.dataset = NuScenes(version=version, dataroot=self.path, verbose=True)
 
-        with open(f"dataset/nuscenes/{self.split}.txt", "r") as f:
+        split_list_path = self._resolve_split_list_path(self.split)
+        with open(split_list_path, "r") as f:
             self.filenames = f.readlines()
+
+    def _resolve_split_list_path(self, split):
+        tmp_dir = os.path.join(tempfile.gettempdir(), "drivingforward_gsplat", "nuscenes")
+        tmp_path = os.path.join(tmp_dir, f"{split}.txt")
+        if os.path.exists(tmp_path):
+            return tmp_path
+
+        legacy_path = os.path.join("dataset", "nuscenes", f"{split}.txt")
+        if os.path.exists(legacy_path):
+            os.makedirs(tmp_dir, exist_ok=True)
+            shutil.copyfile(legacy_path, tmp_path)
+            return tmp_path
+
+        if split in ("eval_MF", "eval_SF"):
+            os.makedirs(tmp_dir, exist_ok=True)
+            with open(tmp_path, "w") as f:
+                for sample in self.dataset.sample:
+                    if not self._has_required_context(sample):
+                        continue
+                    f.write(sample["token"] + "\n")
+            return tmp_path
+
+        return legacy_path
+
+    def _has_required_context(self, sample):
+        if not self.has_context:
+            return True
+
+        for cam in self.cameras:
+            cam_sample = self.dataset.get("sample_data", sample["data"][cam])
+            if self.bwd and not cam_sample["prev"]:
+                return False
+            if self.fwd and not cam_sample["next"]:
+                return False
+        return True
 
     def get_current(self, key, cam_sample):
         """This function returns samples for current contexts."""
