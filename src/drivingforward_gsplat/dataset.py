@@ -14,6 +14,8 @@ from torch.utils.data import Dataset
 from nuscenes.nuscenes import NuScenes
 from pyquaternion import Quaternion
 
+_PIL_INTERPOLATION = pil.Resampling.LANCZOS
+
 
 _DEL_KEYS = [
     "rgb",

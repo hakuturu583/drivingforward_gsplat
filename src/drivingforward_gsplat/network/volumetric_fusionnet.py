@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from pytorch3d.transforms import axis_angle_to_matrix
+
+from drivingforward_gsplat.utils.rotations import axis_angle_to_matrix
 
 from .blocks import conv2d, conv1d, pack_cam_feat
 

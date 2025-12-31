@@ -1,5 +1,6 @@
 import torch
-from pytorch3d.transforms import matrix_to_euler_angles 
+
+from drivingforward_gsplat.utils.rotations import matrix_to_euler_angles
 
 from .loss_util import compute_photometric_loss, compute_masked_loss
 from .single_cam_loss import SingleCamLoss

@@ -1,7 +1,8 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from pytorch3d.transforms import axis_angle_to_matrix 
+
+from drivingforward_gsplat.utils.rotations import axis_angle_to_matrix
 
         
 def vec_to_matrix(rot_angle, trans_vec, invert=False):
