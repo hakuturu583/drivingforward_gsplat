@@ -13,7 +13,7 @@ def _format_shs_for_gsplat(shs):
         return None
     if shs.dim() != 3:
         return shs
-    # Convert (N, d_sh, 3) -> (N, 3, d_sh) for gsplat conventions.
+    # Legacy gsplat conventions expect (N, 3, d_sh).
     if shs.shape[-1] == 3:
         return shs.transpose(1, 2).contiguous()
     return shs
@@ -80,49 +80,78 @@ def render(
     bg_color,
 ):
     """Render with gsplat. Background tensor must be on the same device."""
-    try:
-        from gsplat import rendering
-    except ImportError as exc:
-        raise ImportError("gsplat is required for Gaussian rendering.") from exc
+    from gsplat import rendering
 
-    bg = torch.tensor(bg_color, dtype=torch.float32, device=pts_xyz.device)
-    tanfovx = math.tan(novel_FovX * 0.5)
-    tanfovy = math.tan(novel_FovY * 0.5)
+    device = pts_xyz.device
+    dtype = pts_xyz.dtype
+    bg = torch.tensor(bg_color, dtype=dtype, device=device)
 
-    shs = _format_shs_for_gsplat(shs)
     opacities = opacity.squeeze(-1) if opacity is not None else None
+    colors = shs if shs is not None else pts_rgb
     sh_degree = None
-    if shs is not None and shs.dim() == 3:
-        sh_degree = int(math.sqrt(shs.shape[-1])) - 1
+    if colors is not None and colors.dim() == 3 and colors.shape[-1] == 3:
+        sh_degree = int(math.isqrt(colors.shape[-2])) - 1
 
-    values = {
-        "means3D": pts_xyz,
-        "scales": scales,
-        "rotations": rotations,
-        "opacities": opacities,
-        "shs": shs,
-        "viewmats": novel_world_view_transform,
-        "projmats": novel_full_proj_transform,
-        "image_height": int(novel_height),
-        "image_width": int(novel_width),
-        "tanfovx": tanfovx,
-        "tanfovy": tanfovy,
-        "bg": bg,
-        "sh_degree": sh_degree,
-        "campos": novel_camera_center,
-        "camera_center": novel_camera_center,
-    }
+    fovx = torch.as_tensor(novel_FovX, device=device, dtype=dtype)
+    fovy = torch.as_tensor(novel_FovY, device=device, dtype=dtype)
+    width_t = torch.tensor(float(novel_width), device=device, dtype=dtype)
+    height_t = torch.tensor(float(novel_height), device=device, dtype=dtype)
+    fx = width_t / (2.0 * torch.tan(fovx * 0.5))
+    fy = height_t / (2.0 * torch.tan(fovy * 0.5))
+    cx = width_t * 0.5
+    cy = height_t * 0.5
+    zeros = torch.zeros((), device=device, dtype=dtype)
+    ones = torch.ones((), device=device, dtype=dtype)
+    Ks = torch.stack(
+        [
+            torch.stack([fx, zeros, cx]),
+            torch.stack([zeros, fy, cy]),
+            torch.stack([zeros, zeros, ones]),
+        ]
+    ).unsqueeze(0)
+    viewmats = novel_world_view_transform.to(device=device, dtype=dtype).unsqueeze(0)
+    backgrounds = bg.unsqueeze(0)
 
-    for fn_name in ("rasterize_gaussians", "render_gaussians", "rasterize"):
-        fn = getattr(rendering, fn_name, None)
-        if fn is None:
-            continue
-        rendered = _call_gsplat(fn, values)
-        if isinstance(rendered, (tuple, list)):
-            return rendered[0]
-        return rendered
+    if hasattr(rendering, "rasterization"):
 
-    raise AttributeError("gsplat.rendering does not expose a supported rasterizer.")
+        rendered = rendering.rasterization(
+            means=pts_xyz,
+            quats=rotations,
+            scales=scales,
+            opacities=opacities,
+            colors=colors,
+            viewmats=viewmats,
+            Ks=Ks,
+            width=int(novel_width),
+            height=int(novel_height),
+            backgrounds=backgrounds,
+            sh_degree=sh_degree,
+        )
+        rendered = rendered[0] if isinstance(rendered, (tuple, list)) else rendered
+    elif hasattr(rendering, "rasterization_inria_wrapper"):
+        values = {
+            "means": pts_xyz,
+            "quats": rotations,
+            "scales": scales,
+            "opacities": opacities,
+            "colors": shs if shs is not None else pts_rgb,
+            "viewmats": viewmats,
+            "Ks": Ks,
+            "width": int(novel_width),
+            "height": int(novel_height),
+            "backgrounds": backgrounds,
+            "sh_degree": sh_degree,
+        }
+        rendered = rendering.rasterization_inria_wrapper(**values)
+        rendered = rendered[0] if isinstance(rendered, (tuple, list)) else rendered
+    else:
+        raise AttributeError("gsplat.rendering does not expose a supported rasterizer.")
+
+    if rendered.dim() == 3 and rendered.shape[-1] in (1, 3):
+        rendered = rendered.permute(2, 0, 1)
+    elif rendered.dim() == 4 and rendered.shape[-1] in (1, 3):
+        rendered = rendered.permute(0, 3, 1, 2)
+    return rendered
 
 
 def get_adj_cams(cam):
