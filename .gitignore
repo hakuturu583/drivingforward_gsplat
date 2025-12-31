@@ -1,2 +1,3 @@
 torchscript
 .env
+__pycache__
