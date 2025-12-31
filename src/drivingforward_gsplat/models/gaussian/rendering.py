@@ -1,5 +1,7 @@
 import inspect
+import locale
 import math
+import os
 
 import torch
 from einops import rearrange
@@ -63,6 +65,22 @@ def _call_gsplat(fn, values):
     return fn(**kwargs)
 
 
+def _ensure_utf8_locale():
+    # Best-effort fix for gsplat JIT reading source files under ASCII locale.
+    if os.environ.get("PYTHONUTF8") != "1":
+        os.environ["PYTHONUTF8"] = "1"
+    for key in ("LC_ALL", "LANG"):
+        if os.environ.get(key, "") in ("", "C", "POSIX"):
+            os.environ[key] = "C.UTF-8"
+    try:
+        locale.setlocale(locale.LC_ALL, "")
+    except locale.Error:
+        try:
+            locale.setlocale(locale.LC_ALL, "C.UTF-8")
+        except locale.Error:
+            pass
+
+
 def render(
     novel_FovX,
     novel_FovY,
@@ -80,7 +98,16 @@ def render(
     bg_color,
 ):
     """Render with gsplat. Background tensor must be on the same device."""
-    from gsplat import rendering
+    _ensure_utf8_locale()
+    try:
+        from gsplat import rendering
+    except ImportError as exc:
+        msg = str(exc)
+        if "gsplat.csrc" in msg or "csrc" in msg:
+            raise ImportError(
+                "gsplat CUDA kernels are missing. Reinstall gsplat from source to build CUDA."
+            ) from exc
+        raise ImportError("gsplat is required for Gaussian rendering.") from exc
 
     device = pts_xyz.device
     dtype = pts_xyz.dtype
