@@ -1,3 +1,4 @@
 torchscript
 .env
 __pycache__
+results/

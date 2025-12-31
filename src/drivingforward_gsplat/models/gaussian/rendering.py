@@ -89,6 +89,7 @@ def render(
     novel_world_view_transform,
     novel_full_proj_transform,
     novel_camera_center,
+    novel_K,
     pts_xyz,
     pts_rgb,
     rotations,
@@ -119,27 +120,36 @@ def render(
     if colors is not None and colors.dim() == 3 and colors.shape[-1] == 3:
         sh_degree = int(math.isqrt(colors.shape[-2])) - 1
 
-    fovx = torch.as_tensor(novel_FovX, device=device, dtype=dtype)
-    fovy = torch.as_tensor(novel_FovY, device=device, dtype=dtype)
-    width_t = torch.tensor(float(novel_width), device=device, dtype=dtype)
-    height_t = torch.tensor(float(novel_height), device=device, dtype=dtype)
-    fx = width_t / (2.0 * torch.tan(fovx * 0.5))
-    fy = height_t / (2.0 * torch.tan(fovy * 0.5))
-    cx = width_t * 0.5
-    cy = height_t * 0.5
-    zeros = torch.zeros((), device=device, dtype=dtype)
-    ones = torch.ones((), device=device, dtype=dtype)
-    Ks = torch.stack(
-        [
-            torch.stack([fx, zeros, cx]),
-            torch.stack([zeros, fy, cy]),
-            torch.stack([zeros, zeros, ones]),
-        ]
-    ).unsqueeze(0)
-    viewmats = novel_world_view_transform.to(device=device, dtype=dtype).unsqueeze(0)
-    backgrounds = bg.unsqueeze(0)
-
+    if novel_K is not None:
+        K_use = novel_K.to(device=device, dtype=dtype)
+        if K_use.shape[-1] == 4:
+            K_use = K_use[:3, :3]
+        Ks = K_use.unsqueeze(0)
+    else:
+        fovx = torch.as_tensor(novel_FovX, device=device, dtype=dtype)
+        fovy = torch.as_tensor(novel_FovY, device=device, dtype=dtype)
+        width_t = torch.tensor(float(novel_width), device=device, dtype=dtype)
+        height_t = torch.tensor(float(novel_height), device=device, dtype=dtype)
+        fx = width_t / (2.0 * torch.tan(fovx * 0.5))
+        fy = height_t / (2.0 * torch.tan(fovy * 0.5))
+        cx = width_t * 0.5
+        cy = height_t * 0.5
+        zeros = torch.zeros((), device=device, dtype=dtype)
+        ones = torch.ones((), device=device, dtype=dtype)
+        Ks = torch.stack(
+            [
+                torch.stack([fx, zeros, cx]),
+                torch.stack([zeros, fy, cy]),
+                torch.stack([zeros, zeros, ones]),
+            ]
+        ).unsqueeze(0)
+    viewmats = (
+        novel_world_view_transform.to(device=device, dtype=dtype)
+        .unsqueeze(0)
+        .transpose(-2, -1)
+    )
     if hasattr(rendering, "rasterization"):
+        backgrounds = bg
 
         rendered = rendering.rasterization(
             means=pts_xyz,
@@ -156,6 +166,7 @@ def render(
         )
         rendered = rendered[0] if isinstance(rendered, (tuple, list)) else rendered
     elif hasattr(rendering, "rasterization_inria_wrapper"):
+        backgrounds = bg.unsqueeze(0)
         values = {
             "means": pts_xyz,
             "quats": rotations,
@@ -178,6 +189,8 @@ def render(
         rendered = rendered.permute(2, 0, 1)
     elif rendered.dim() == 4 and rendered.shape[-1] in (1, 3):
         rendered = rendered.permute(0, 3, 1, 2)
+        if rendered.size(0) == 1:
+            rendered = rendered.squeeze(0)
     return rendered
 
 
@@ -279,6 +292,8 @@ def pts2render(inputs, outputs, cam_num, novel_cam, novel_frame_id, bg_color, mo
             ("camera_center", novel_frame_id, 0)
         ][i]
 
+        K_i = inputs.get(("K", 0), None)
+        K_i = K_i[i, novel_cam, ...] if K_i is not None else None
         render_novel_i = render(
             novel_FovX=novel_FovX_i,
             novel_FovY=novel_FovY_i,
@@ -287,6 +302,7 @@ def pts2render(inputs, outputs, cam_num, novel_cam, novel_frame_id, bg_color, mo
             novel_world_view_transform=novel_world_view_transform_i,
             novel_full_proj_transform=novel_function_proj_transform_i,
             novel_camera_center=novel_camera_center_i,
+            novel_K=K_i,
             pts_xyz=pts_xyz_i,
             pts_rgb=None,
             rotations=rot_i,

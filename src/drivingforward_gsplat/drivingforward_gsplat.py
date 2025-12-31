@@ -1,4 +1,5 @@
 import argparse
+import locale
 import os
 import sys
 
@@ -6,6 +7,18 @@ import torch
 from dotenv import load_dotenv
 from huggingface_hub import snapshot_download
 from torch.utils.data import DataLoader, Dataset
+
+if os.environ.get("DRIVINGFORWARD_UTF8_REEXEC") != "1":
+    encoding = locale.getpreferredencoding(False).lower()
+    if sys.flags.utf8_mode == 0 and encoding == "ascii":
+        env = os.environ.copy()
+        env["PYTHONUTF8"] = "1"
+        if env.get("LANG", "") in ("", "C", "POSIX"):
+            env["LANG"] = "C.UTF-8"
+        if env.get("LC_ALL", "") in ("", "C", "POSIX"):
+            env["LC_ALL"] = "C.UTF-8"
+        env["DRIVINGFORWARD_UTF8_REEXEC"] = "1"
+        os.execvpe(sys.executable, [sys.executable] + sys.argv, env)
 
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False

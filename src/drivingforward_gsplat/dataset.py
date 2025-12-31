@@ -779,7 +779,17 @@ class NuScenesdataset(Dataset):
         )
 
         if os.path.exists(filename):
-            return np.load(filename, allow_pickle=True)["depth"]
+            try:
+                loaded = np.load(filename, allow_pickle=True)
+                depth = loaded["depth"]
+                if depth.size == 0:
+                    raise ValueError("empty depth cache")
+                return depth
+            except (EOFError, ValueError, KeyError):
+                try:
+                    os.remove(filename)
+                except OSError:
+                    pass
 
         lidar_sample = self.dataset.get("sample_data", sample["data"]["LIDAR_TOP"])
 
