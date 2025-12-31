@@ -100,10 +100,9 @@ def ensure_torchscript_modules(torchscript_dir, repo_id):
 
 
 def build_inference(cfg, args, torchscript_dir, drivingforward_root):
-    sys.path.insert(0, drivingforward_root)
     from drivingforward_gsplat.dataset import NuScenesdataset, get_transforms
-    from models import DrivingForwardModel
-    from trainer import DrivingForwardTrainer
+    from drivingforward_gsplat.models import DrivingForwardModel
+    from drivingforward_gsplat.trainer import DrivingForwardTrainer
 
     class EnvNuScenesDataset(Dataset):
         def __init__(
@@ -382,9 +381,7 @@ def main():
 
     nuscenes_root = load_nuscenes_root()
 
-    os.chdir(drivingforward_root)
-    sys.path.insert(0, drivingforward_root)
-    import utils
+    from drivingforward_gsplat import utils
 
     cfg = utils.get_config(
         config_file,

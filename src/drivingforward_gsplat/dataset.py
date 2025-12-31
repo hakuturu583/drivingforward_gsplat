@@ -883,3 +883,52 @@ class NuScenesdataset(Dataset):
         sample = stack_sample(sample)
         sample = align_dataset(sample, self.scales, contexts)
         return sample
+
+
+def construct_dataset(cfg, mode, **kwargs):
+    """Construct datasets based on config and mode."""
+    if mode == "train":
+        dataset_args = {
+            "cameras": cfg["data"]["cameras"],
+            "back_context": cfg["data"]["back_context"],
+            "forward_context": cfg["data"]["forward_context"],
+            "data_transform": get_transforms("train", **kwargs),
+            "depth_type": cfg["data"]["depth_type"]
+            if "gt_depth" in cfg["data"]["train_requirements"]
+            else None,
+            "with_pose": "gt_pose" in cfg["data"]["train_requirements"],
+            "with_ego_pose": "gt_ego_pose" in cfg["data"]["train_requirements"],
+            "with_mask": "mask" in cfg["data"]["train_requirements"],
+        }
+    elif mode in ("val", "eval"):
+        dataset_args = {
+            "cameras": cfg["data"]["cameras"],
+            "back_context": cfg["data"]["back_context"],
+            "forward_context": cfg["data"]["forward_context"],
+            "data_transform": get_transforms("train", **kwargs),
+            "depth_type": cfg["data"]["depth_type"]
+            if "gt_depth" in cfg["data"]["val_requirements"]
+            else None,
+            "with_pose": "gt_pose" in cfg["data"]["val_requirements"],
+            "with_ego_pose": "gt_ego_pose" in cfg["data"]["val_requirements"],
+            "with_mask": "mask" in cfg["data"]["val_requirements"],
+        }
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
+
+    if cfg["data"]["dataset"] == "nuscenes":
+        if mode == "train":
+            split = "train"
+        else:
+            if cfg["model"]["novel_view_mode"] == "MF":
+                split = "eval_MF"
+            elif cfg["model"]["novel_view_mode"] == "SF":
+                split = "eval_SF"
+            else:
+                raise ValueError(
+                    f"Unknown novel view mode: {cfg['model']['novel_view_mode']}"
+                )
+        dataset = NuScenesdataset(cfg["data"]["data_path"], split, **dataset_args)
+    else:
+        raise ValueError(f"Unknown dataset: {cfg['data']['dataset']}")
+    return dataset
