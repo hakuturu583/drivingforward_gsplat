@@ -128,7 +128,7 @@ def parse_crop_borders(borders, shape):
     return borders
 
 
-def resize_image(image, shape, interpolation=pil.ANTIALIAS):
+def resize_image(image, shape, interpolation=_PIL_INTERPOLATION):
     """Resizes input image."""
     transform = transforms.Resize(shape, interpolation=interpolation)
     return transform(image)
@@ -162,7 +162,7 @@ def resize_depth_preserve(depth, shape):
 
 
 def resize_sample_image_and_intrinsics(
-    sample, shape, image_interpolation=pil.ANTIALIAS
+    sample, shape, image_interpolation=_PIL_INTERPOLATION
 ):
     """Resizes the image and intrinsics of a sample."""
     image_transform = transforms.Resize(shape, interpolation=image_interpolation)
@@ -180,7 +180,7 @@ def resize_sample_image_and_intrinsics(
     return sample
 
 
-def resize_sample(sample, shape, image_interpolation=pil.ANTIALIAS):
+def resize_sample(sample, shape, image_interpolation=_PIL_INTERPOLATION):
     """Resizes a sample, including image, intrinsics and depth maps."""
     sample = resize_sample_image_and_intrinsics(sample, shape, image_interpolation)
     for key in filter_dict(sample, ["depth", "input_depth"]):
@@ -431,7 +431,7 @@ def get_transforms(
 def transform_mask_sample(sample, data_transform):
     """Transforms masks to match input rgb images."""
     image_shape = data_transform.keywords["image_shape"]
-    resize_transform = transforms.Resize(image_shape, interpolation=pil.ANTIALIAS)
+    resize_transform = transforms.Resize(image_shape, interpolation=_PIL_INTERPOLATION)
     sample["mask"] = resize_transform(sample["mask"])
     tensor_transform = transforms.ToTensor()
     sample["mask"] = tensor_transform(sample["mask"])
@@ -932,3 +932,4 @@ def construct_dataset(cfg, mode, **kwargs):
     else:
         raise ValueError(f"Unknown dataset: {cfg['data']['dataset']}")
     return dataset
+_PIL_INTERPOLATION = pil.Resampling.LANCZOS
