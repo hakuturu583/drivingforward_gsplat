@@ -63,18 +63,6 @@ def parse_args():
         type=str,
         help="Hugging Face repo with torchscript modules",
     )
-    parser.add_argument(
-        "--dotenv_path",
-        default="",
-        type=str,
-        help="Optional path to .env (defaults to ./ .env if present)",
-    )
-    parser.add_argument(
-        "--env_key",
-        default="NUSCENES_DATA_ROOT",
-        type=str,
-        help="Environment variable for NuScenes data root",
-    )
     return parser.parse_args()
 
 
@@ -84,15 +72,12 @@ def resolve_path(base, path):
     return path if os.path.isabs(path) else os.path.join(base, path)
 
 
-def load_nuscenes_root(env_key, dotenv_path):
-    if dotenv_path:
-        load_dotenv(dotenv_path)
-    else:
-        load_dotenv()
-    data_root = os.getenv(env_key)
+def load_nuscenes_root():
+    load_dotenv()
+    data_root = os.getenv("NUSCENES_DATA_ROOT")
     if not data_root:
         raise ValueError(
-            f"Missing {env_key}. Set it via .env to /mnt/sata_ssd/nuscenes_full/v1.0"
+            "Missing NUSCENES_DATA_ROOT. Set it via .env to /mnt/sata_ssd/nuscenes_full/v1.0"
         )
     return data_root
 
@@ -135,11 +120,11 @@ def build_inference(cfg, args, torchscript_dir, drivingforward_root):
             with_ego_pose=None,
             with_mask=None,
         ):
-            load_dotenv(args.dotenv_path or None)
-            data_root = os.getenv(args.env_key)
+            load_dotenv()
+            data_root = os.getenv("NUSCENES_DATA_ROOT")
             if not data_root:
                 raise ValueError(
-                    f"Missing {args.env_key}. Set it via .env to /mnt/sata_ssd/nuscenes_full/v1.0"
+                    "Missing NUSCENES_DATA_ROOT. Set it via .env to /mnt/sata_ssd/nuscenes_full/v1.0"
                 )
             self._dataset = NuScenesdataset(
                 data_root,
@@ -396,14 +381,7 @@ def main():
     torchscript_dir = resolve_path(repo_root, args.torchscript_dir)
     weight_path = resolve_path(repo_root, args.weight_path)
 
-    dotenv_path = (
-        args.dotenv_path if args.dotenv_path else os.path.join(repo_root, ".env")
-    )
-    if not os.path.isfile(dotenv_path):
-        dotenv_path = ""
-    args.dotenv_path = dotenv_path
-
-    nuscenes_root = load_nuscenes_root(args.env_key, dotenv_path)
+    nuscenes_root = load_nuscenes_root()
 
     os.chdir(drivingforward_root)
     sys.path.insert(0, drivingforward_root)
