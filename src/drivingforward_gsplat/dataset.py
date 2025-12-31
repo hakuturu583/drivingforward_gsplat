@@ -785,7 +785,7 @@ class NuScenesdataset(Dataset):
                 if depth.size == 0:
                     raise ValueError("empty depth cache")
                 return depth
-            except (EOFError, ValueError, KeyError):
+            except (EOFError, ValueError, KeyError, OSError):
                 try:
                     os.remove(filename)
                 except OSError:
