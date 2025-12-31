@@ -2,6 +2,7 @@ import argparse
 import locale
 import os
 import sys
+import shutil
 
 import torch
 from dotenv import load_dotenv
@@ -393,6 +394,8 @@ def main():
     weight_path = resolve_path(repo_root, args.weight_path)
 
     nuscenes_root = load_nuscenes_root()
+    depth_map_root = os.path.join(os.path.dirname(nuscenes_root), "samples", "DEPTH_MAP")
+    shutil.rmtree(depth_map_root, ignore_errors=True)
 
     from drivingforward_gsplat import utils
 
