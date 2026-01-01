@@ -351,7 +351,16 @@ def main():
 
     sample = dataset[i2i_cfg.sample_index]
     images_tensor = sample[("color", 0, 0)]
-    images = [images_tensor[i] for i in range(images_tensor.shape[0])]
+    cam_order = [
+        "CAM_FRONT_RIGHT",
+        "CAM_FRONT",
+        "CAM_FRONT_LEFT",
+        "CAM_BACK_LEFT",
+        "CAM_BACK",
+        "CAM_BACK_RIGHT",
+    ]
+    cam_to_index = {name: idx for idx, name in enumerate(cfg["data"]["cameras"])}
+    images = [images_tensor[cam_to_index[name]] for name in cam_order]
     depth_device = torch.device(i2i_cfg.depth_device)
     image_strip, control_strip, _ = _build_control_image(
         images,
