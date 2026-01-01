@@ -8,14 +8,20 @@ from einops import einsum
 import math
 import numpy as np
 
+
 def depth2pc(depth, extrinsic, intrinsic):
     B, C, H, W = depth.shape
     depth = depth[:, 0, :, :]
     rot = extrinsic[:, :3, :3]
     trans = extrinsic[:, :3, 3:]
 
-    y, x = torch.meshgrid(torch.linspace(0.5, H-0.5, H, device=depth.device), torch.linspace(0.5, W-0.5, W, device=depth.device))
-    pts_2d = torch.stack([x, y, torch.ones_like(x)], dim=-1).unsqueeze(0).repeat(B, 1, 1, 1)  # B H W 3
+    y, x = torch.meshgrid(
+        torch.linspace(0.5, H - 0.5, H, device=depth.device),
+        torch.linspace(0.5, W - 0.5, W, device=depth.device),
+    )
+    pts_2d = (
+        torch.stack([x, y, torch.ones_like(x)], dim=-1).unsqueeze(0).repeat(B, 1, 1, 1)
+    )  # B H W 3
 
     pts_2d[..., 2] = depth
     pts_2d[:, :, :, 0] -= intrinsic[:, None, None, 0, 2]
@@ -33,6 +39,7 @@ def depth2pc(depth, extrinsic, intrinsic):
 
     return pts.permute(0, 2, 1)
 
+
 def rotate_sh(
     sh_coefficients: Float[Tensor, "*#batch n"],
     rotations: Float[Tensor, "*#batch 3 3"],
@@ -47,7 +54,7 @@ def rotate_sh(
         sh_rotations = _wigner_D_on_device(degree, alpha, beta, gamma, device, dtype)
         sh_rotated = einsum(
             sh_rotations,
-            sh_coefficients[..., degree**2 : (degree + 1) ** 2],
+            sh_coefficients[..., degree ** 2 : (degree + 1) ** 2],
             "... i j, ... j -> ... i",
         )
         result.append(sh_rotated)
@@ -68,15 +75,21 @@ def _wigner_D_on_device(
     beta = beta.to(device=device, dtype=dtype)[..., None, None] % (2 * math.pi)
     gamma = gamma.to(device=device, dtype=dtype)[..., None, None] % (2 * math.pi)
     X = so3_generators(l).to(device=device, dtype=dtype)
-    return torch.matrix_exp(alpha * X[1]) @ torch.matrix_exp(beta * X[0]) @ torch.matrix_exp(gamma * X[1])
+    return (
+        torch.matrix_exp(alpha * X[1])
+        @ torch.matrix_exp(beta * X[0])
+        @ torch.matrix_exp(gamma * X[1])
+    )
+
 
 def focal2fov(focal, pixels):
-    return 2*math.atan(pixels/(2*focal))
+    return 2 * math.atan(pixels / (2 * focal))
+
 
 def getProjectionMatrix(znear, zfar, K, h, w):
     near_fx = znear / K[0, 0]
     near_fy = znear / K[1, 1]
-    left = - (w - K[0, 2]) * near_fx
+    left = -(w - K[0, 2]) * near_fx
     right = K[0, 2] * near_fx
     bottom = (K[1, 2] - h) * near_fy
     top = K[1, 2] * near_fy
@@ -92,7 +105,8 @@ def getProjectionMatrix(znear, zfar, K, h, w):
     P[2, 3] = -(zfar * znear) / (zfar - znear)
     return P
 
-def getWorld2View2(R, t, translate=np.array([.0, .0, .0]), scale=1.0):
+
+def getWorld2View2(R, t, translate=np.array([0.0, 0.0, 0.0]), scale=1.0):
     Rt = np.zeros((4, 4))
     Rt[:3, :3] = R.transpose()
     Rt[:3, 3] = t

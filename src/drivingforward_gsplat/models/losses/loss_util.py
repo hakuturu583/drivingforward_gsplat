@@ -1,9 +1,9 @@
 import torch
 import torch.nn.functional as F
-    
+
 
 def compute_auto_masks(reprojection_loss, identity_reprojection_loss):
-    """ 
+    """
     This function computes auto mask using reprojection loss and identity reprojection loss.
     """
     if identity_reprojection_loss is None:
@@ -17,10 +17,10 @@ def compute_auto_masks(reprojection_loss, identity_reprojection_loss):
     return reprojection_loss_mask
 
 
-def compute_masked_loss(loss, mask):    
+def compute_masked_loss(loss, mask):
     """
     This function masks losses while avoiding zero division.
-    """    
+    """
     return (loss * mask).sum() / (mask.sum() + 1e-8)
 
 
@@ -47,23 +47,26 @@ def compute_ssim_loss(pred, target):
     pred = ref_pad(pred)
     target = ref_pad(target)
 
-    mu_pred = F.avg_pool2d(pred, kernel_size = 3, stride = 1)
-    mu_target = F.avg_pool2d(target, kernel_size = 3, stride = 1)
+    mu_pred = F.avg_pool2d(pred, kernel_size=3, stride=1)
+    mu_target = F.avg_pool2d(target, kernel_size=3, stride=1)
 
     musq_pred = mu_pred.pow(2)
     musq_target = mu_target.pow(2)
-    mu_pred_target = mu_pred*mu_target
+    mu_pred_target = mu_pred * mu_target
 
-    sigma_pred = F.avg_pool2d(pred.pow(2), kernel_size = 3, stride = 1)-musq_pred
-    sigma_target = F.avg_pool2d(target.pow(2), kernel_size = 3, stride = 1)-musq_target
-    sigma_pred_target = F.avg_pool2d(pred*target, kernel_size = 3, stride = 1)-mu_pred_target
+    sigma_pred = F.avg_pool2d(pred.pow(2), kernel_size=3, stride=1) - musq_pred
+    sigma_target = F.avg_pool2d(target.pow(2), kernel_size=3, stride=1) - musq_target
+    sigma_pred_target = (
+        F.avg_pool2d(pred * target, kernel_size=3, stride=1) - mu_pred_target
+    )
 
-    C1 = 0.01**2
-    C2 = 0.03**2
+    C1 = 0.01 ** 2
+    C2 = 0.03 ** 2
 
-    ssim_map = ((2*mu_pred_target + C1)*(2*sigma_pred_target + C2)) \
-                    /((musq_pred + musq_target + C1)*(sigma_pred + sigma_target + C2)+1e-8)    
-    return torch.clamp((1-ssim_map)/2, 0, 1)
+    ssim_map = ((2 * mu_pred_target + C1) * (2 * sigma_pred_target + C2)) / (
+        (musq_pred + musq_target + C1) * (sigma_pred + sigma_target + C2) + 1e-8
+    )
+    return torch.clamp((1 - ssim_map) / 2, 0, 1)
 
 
 def compute_photometric_loss(pred=None, target=None):

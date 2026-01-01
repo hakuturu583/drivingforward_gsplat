@@ -1,4 +1,4 @@
-prompt: "sunset urban street, cinematic"
+prompt: "urban street at sunset, warm orange and pink sky, long shadows, golden hour lighting, cinematic color grading, high contrast lighting, dramatic atmosphere"
 config_file: "configs/nuscenes/main.yaml"
 output_dir: "output"
 novel_view_mode: "MF"
@@ -13,9 +13,9 @@ control_nets:
     scale: 0.6
 depth_model_id: "depth-anything/DA3METRIC-LARGE"
 depth_device: "cuda"
-strength: 0.6
+strength: 0.4
 steps: 50
-guidance_scale: 5.0
+guidance_scale: 9.0
 cpu_offload: false
 sequential_offload: false
 xformers: false

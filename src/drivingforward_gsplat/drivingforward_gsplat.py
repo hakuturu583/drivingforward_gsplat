@@ -197,9 +197,14 @@ def build_inference(cfg, args, torchscript_dir, drivingforward_root):
             self.depth_decoder = torch.jit.load(dec_path, map_location=device).eval()
 
         def _run_one(self, images, mask, k, inv_k, extrinsics, extrinsics_inv):
-            feat0, feat1, proj_feat, img_feat0, img_feat1, img_feat2 = (
-                self.depth_encoder(images, mask, k, inv_k, extrinsics, extrinsics_inv)
-            )
+            (
+                feat0,
+                feat1,
+                proj_feat,
+                img_feat0,
+                img_feat1,
+                img_feat2,
+            ) = self.depth_encoder(images, mask, k, inv_k, extrinsics, extrinsics_inv)
             disp = self.depth_decoder(feat0, feat1, proj_feat)
             img_feat = (img_feat0, img_feat1, img_feat2)
             return disp, img_feat
@@ -230,8 +235,22 @@ def build_inference(cfg, args, torchscript_dir, drivingforward_root):
                     extrinsics_inv,
                 )
                 feat0, feat1, proj_feat, img_feat0, img_feat1, img_feat2 = enc_out[:6]
-                feat0_last, feat1_last, proj_feat_last, img_feat0_last, img_feat1_last, img_feat2_last = enc_out[6:12]
-                feat0_next, feat1_next, proj_feat_next, img_feat0_next, img_feat1_next, img_feat2_next = enc_out[12:18]
+                (
+                    feat0_last,
+                    feat1_last,
+                    proj_feat_last,
+                    img_feat0_last,
+                    img_feat1_last,
+                    img_feat2_last,
+                ) = enc_out[6:12]
+                (
+                    feat0_next,
+                    feat1_next,
+                    proj_feat_next,
+                    img_feat0_next,
+                    img_feat1_next,
+                    img_feat2_next,
+                ) = enc_out[12:18]
                 disp_cur = self.depth_decoder(feat0, feat1, proj_feat)
                 disp_last = self.depth_decoder(feat0_last, feat1_last, proj_feat_last)
                 disp_next = self.depth_decoder(feat0_next, feat1_next, proj_feat_next)
@@ -287,7 +306,9 @@ def build_inference(cfg, args, torchscript_dir, drivingforward_root):
             super().__init__(cfg, rank)
 
         def prepare_model(self, cfg, rank):
-            device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
+            device = torch.device(
+                f"cuda:{rank}" if torch.cuda.is_available() else "cpu"
+            )
             mode = cfg["model"]["novel_view_mode"]
             models = {
                 "pose_net": TorchScriptPoseNet(
@@ -348,7 +369,9 @@ def main():
     weight_path = resolve_path(repo_root, args.weight_path)
 
     nuscenes_root = load_nuscenes_root()
-    depth_map_root = os.path.join(os.path.dirname(nuscenes_root), "samples", "DEPTH_MAP")
+    depth_map_root = os.path.join(
+        os.path.dirname(nuscenes_root), "samples", "DEPTH_MAP"
+    )
     shutil.rmtree(depth_map_root, ignore_errors=True)
 
     from drivingforward_gsplat import utils

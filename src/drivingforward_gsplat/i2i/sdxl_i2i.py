@@ -329,7 +329,7 @@ def _dense_depth_from_anything(
 def _control_image_from_canny(image_strip: Image.Image) -> Image.Image:
     gray = np.array(image_strip.convert("L"), dtype=np.float32) / 255.0
     edges = feature.canny(gray, sigma=2.0)
-    edge_img = (edges.astype(np.uint8) * 255)
+    edge_img = edges.astype(np.uint8) * 255
     return Image.fromarray(edge_img, mode="L").convert("RGB")
 
 
@@ -352,7 +352,9 @@ def _build_control_images(
             controls.append(_control_image_from_canny(image_strip))
         elif "depth" in controlnet_id.lower():
             if depths is None:
-                depths = _dense_depth_from_anything(images, depth_device, depth_model_id)
+                depths = _dense_depth_from_anything(
+                    images, depth_device, depth_model_id
+                )
             control_strip = _concat_strip(
                 [_to_pil_depth(d) for d in depths],
                 height or image_strip.height,
@@ -372,7 +374,11 @@ def _parse_args():
 def main():
     args = _parse_args()
     repo_root = os.getcwd()
-    cfg_path = args.config if os.path.isabs(args.config) else os.path.join(repo_root, args.config)
+    cfg_path = (
+        args.config
+        if os.path.isabs(args.config)
+        else os.path.join(repo_root, args.config)
+    )
     i2i_cfg = SdxlI2IConfig.from_yaml(cfg_path)
     config_file = (
         i2i_cfg.config_file

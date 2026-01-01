@@ -21,7 +21,9 @@ class SdxlI2IConfig:
     blend_width: int = 0
     model_id: str = "stabilityai/stable-diffusion-xl-base-1.0"
     control_nets: List[ControlNetConfig] = field(
-        default_factory=lambda: [ControlNetConfig(id="diffusers/controlnet-depth-sdxl-1.0")]
+        default_factory=lambda: [
+            ControlNetConfig(id="diffusers/controlnet-depth-sdxl-1.0")
+        ]
     )
     depth_model_id: str = "depth-anything/DA3METRIC-LARGE"
     depth_device: str = "cuda"
