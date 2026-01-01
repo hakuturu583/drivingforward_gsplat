@@ -982,4 +982,47 @@ def construct_dataset(cfg, mode, **kwargs):
     else:
         raise ValueError(f"Unknown dataset: {cfg['data']['dataset']}")
     return dataset
+
+
+class EnvNuScenesDataset(Dataset):
+    def __init__(
+        self,
+        split,
+        cameras=None,
+        back_context=0,
+        forward_context=0,
+        data_transform=None,
+        depth_type=None,
+        scale_range=2,
+        with_pose=None,
+        with_ego_pose=None,
+        with_mask=None,
+    ):
+        from dotenv import load_dotenv
+
+        load_dotenv(dotenv_path=os.path.join(os.getcwd(), ".env"), override=False)
+        data_root = os.getenv("NUSCENES_DATA_ROOT")
+        if not data_root:
+            raise ValueError(
+                "Missing NUSCENES_DATA_ROOT. Set it via .env to /mnt/sata_ssd/nuscenes_full/v1.0"
+            )
+        self._dataset = NuScenesdataset(
+            data_root,
+            split,
+            cameras=cameras,
+            back_context=back_context,
+            forward_context=forward_context,
+            data_transform=data_transform,
+            depth_type=depth_type,
+            scale_range=scale_range,
+            with_pose=with_pose,
+            with_ego_pose=with_ego_pose,
+            with_mask=with_mask,
+        )
+
+    def __len__(self):
+        return len(self._dataset)
+
+    def __getitem__(self, idx):
+        return self._dataset[idx]
 _PIL_INTERPOLATION = pil.Resampling.LANCZOS

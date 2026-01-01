@@ -1,16 +1,14 @@
 import argparse
 import math
-import os
 from typing import List, Optional, Sequence, Union
 
 import numpy as np
 import torch
 from PIL import Image
-from dotenv import load_dotenv
 
 from diffusers import ControlNetModel, StableDiffusionXLControlNetImg2ImgPipeline
 
-from drivingforward_gsplat.dataset import NuScenesdataset, get_transforms
+from drivingforward_gsplat.dataset import EnvNuScenesDataset, get_transforms
 from drivingforward_gsplat.utils import misc as utils
 
 
@@ -295,47 +293,6 @@ class SdxlStripPanoramaI2I:
         output = output_accum / np.maximum(weight_accum, 1e-6)
         output = np.clip(output, 0, 255).astype(np.uint8)
         return Image.fromarray(output)
-
-
-class EnvNuScenesDataset:
-    def __init__(
-        self,
-        split: str,
-        cameras=None,
-        back_context: int = 0,
-        forward_context: int = 0,
-        data_transform=None,
-        depth_type=None,
-        scale_range: int = 2,
-        with_pose: bool = False,
-        with_ego_pose: bool = False,
-        with_mask: bool = False,
-    ) -> None:
-        load_dotenv(dotenv_path=os.path.join(os.getcwd(), ".env"), override=False)
-        data_root = os.getenv("NUSCENES_DATA_ROOT")
-        if not data_root:
-            raise ValueError(
-                "Missing NUSCENES_DATA_ROOT. Set it via .env to /mnt/sata_ssd/nuscenes_full/v1.0"
-            )
-        self._dataset = NuScenesdataset(
-            data_root,
-            split,
-            cameras=cameras,
-            back_context=back_context,
-            forward_context=forward_context,
-            data_transform=data_transform,
-            depth_type=depth_type,
-            scale_range=scale_range,
-            with_pose=with_pose,
-            with_ego_pose=with_ego_pose,
-            with_mask=with_mask,
-        )
-
-    def __len__(self) -> int:
-        return len(self._dataset)
-
-    def __getitem__(self, idx: int):
-        return self._dataset[idx]
 
 
 def _build_env_dataset(cfg, mode: str):

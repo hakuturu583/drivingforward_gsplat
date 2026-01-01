@@ -114,49 +114,9 @@ def ensure_torchscript_modules(torchscript_dir, repo_id):
 
 
 def build_inference(cfg, args, torchscript_dir, drivingforward_root):
-    from drivingforward_gsplat.dataset import NuScenesdataset, get_transforms
+    from drivingforward_gsplat.dataset import EnvNuScenesDataset, get_transforms
     from drivingforward_gsplat.models import DrivingForwardModel
     from drivingforward_gsplat.trainer import DrivingForwardTrainer
-
-    class EnvNuScenesDataset(Dataset):
-        def __init__(
-            self,
-            split,
-            cameras=None,
-            back_context=0,
-            forward_context=0,
-            data_transform=None,
-            depth_type=None,
-            scale_range=2,
-            with_pose=None,
-            with_ego_pose=None,
-            with_mask=None,
-        ):
-            load_dotenv()
-            data_root = os.getenv("NUSCENES_DATA_ROOT")
-            if not data_root:
-                raise ValueError(
-                    "Missing NUSCENES_DATA_ROOT. Set it via .env to /mnt/sata_ssd/nuscenes_full/v1.0"
-                )
-            self._dataset = NuScenesdataset(
-                data_root,
-                split,
-                cameras=cameras,
-                back_context=back_context,
-                forward_context=forward_context,
-                data_transform=data_transform,
-                depth_type=depth_type,
-                scale_range=scale_range,
-                with_pose=with_pose,
-                with_ego_pose=with_ego_pose,
-                with_mask=with_mask,
-            )
-
-        def __len__(self):
-            return len(self._dataset)
-
-        def __getitem__(self, idx):
-            return self._dataset[idx]
 
     def construct_env_dataset(cfg, mode, **kwargs):
         if mode == "train":
