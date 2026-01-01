@@ -71,12 +71,6 @@ def parse_args():
         type=str,
         help="Directory for torchscript modules (relative to this repo)",
     )
-    parser.add_argument(
-        "--torchscript_repo",
-        default="hakuturu583/DrivingForward",
-        type=str,
-        help="Hugging Face repo with torchscript modules",
-    )
     return parser.parse_args()
 
 
@@ -367,7 +361,7 @@ def main():
     )
     cfg["data"]["data_path"] = nuscenes_root
 
-    ensure_torchscript_modules(torchscript_dir, args.torchscript_repo)
+    ensure_torchscript_modules(torchscript_dir, "hakuturu583/DrivingForward")
     trainer, model = build_inference(cfg, args, torchscript_dir, drivingforward_root)
     trainer.evaluate(model)
 
