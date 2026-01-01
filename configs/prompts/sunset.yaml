@@ -1,3 +1,4 @@
 prompt: "urban street at sunset, warm orange and pink sky, long shadows, golden hour lighting, cinematic color grading, high contrast lighting, dramatic atmosphere"
 negative_prompt: "daytime, noon, overcast sky, flat lighting, diffuse lighting, neutral daylight"
-reference_images: []
+reference_images:
+  - configs/prompts/sunset.png
