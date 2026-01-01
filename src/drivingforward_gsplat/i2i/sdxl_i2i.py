@@ -141,7 +141,7 @@ class SdxlStripPanoramaI2I:
     def __init__(
         self,
         model_id: str = "stabilityai/stable-diffusion-xl-base-1.0",
-        controlnet_id: str = "diffusers/controlnet-depth-sdxl-1.0",
+        controlnet_ids: Sequence[str] = ("diffusers/controlnet-depth-sdxl-1.0",),
         device: Optional[str] = None,
         torch_dtype: torch.dtype = torch.float16,
         enable_cpu_offload: bool = True,
@@ -153,9 +153,10 @@ class SdxlStripPanoramaI2I:
         self.device = device
         self.torch_dtype = torch_dtype
 
-        controlnet = ControlNetModel.from_pretrained(
-            controlnet_id, torch_dtype=torch_dtype
-        )
+        controlnet = [
+            ControlNetModel.from_pretrained(controlnet_id, torch_dtype=torch_dtype)
+            for controlnet_id in controlnet_ids
+        ]
         self.pipe = StableDiffusionXLControlNetImg2ImgPipeline.from_pretrained(
             model_id, controlnet=controlnet, torch_dtype=torch_dtype
         )
@@ -227,6 +228,10 @@ class SdxlStripPanoramaI2I:
             )
         else:
             control_strip = control_image
+        if isinstance(control_strip, list):
+            control_for_size = control_strip[0]
+        else:
+            control_for_size = control_strip
 
         generator = None
         if seed is not None:
@@ -241,8 +246,8 @@ class SdxlStripPanoramaI2I:
             guidance_scale=guidance_scale,
             controlnet_conditioning_scale=controlnet_conditioning_scale,
             generator=generator,
-            height=control_strip.height,
-            width=control_strip.width,
+            height=control_for_size.height,
+            width=control_for_size.width,
         )
         output = result.images[0]
         if height is not None and output.size != target_size:
@@ -328,9 +333,9 @@ def _control_image_from_canny(image_strip: Image.Image) -> Image.Image:
     return Image.fromarray(edge_img, mode="L").convert("RGB")
 
 
-def _build_control_image(
+def _build_control_images(
     images: Sequence[ImageLike],
-    controlnet_id: str,
+    controlnet_ids: Sequence[str],
     depth_device: torch.device,
     depth_model_id: str,
     height: Optional[int],
@@ -340,16 +345,22 @@ def _build_control_image(
     target_height = pil_images[0].height
     image_strip = _concat_strip(pil_images, height)
     target_size = (target_width, target_height)
-    if "canny" in controlnet_id.lower():
-        control_strip = _control_image_from_canny(image_strip)
-        return image_strip, control_strip, target_size
-
-    depths = _dense_depth_from_anything(images, depth_device, depth_model_id)
-    control_strip = _concat_strip(
-        [_to_pil_depth(d) for d in depths],
-        height or image_strip.height,
-    ).convert("RGB")
-    return image_strip, control_strip, target_size
+    controls: List[Image.Image] = []
+    depths = None
+    for controlnet_id in controlnet_ids:
+        if "canny" in controlnet_id.lower():
+            controls.append(_control_image_from_canny(image_strip))
+        elif "depth" in controlnet_id.lower():
+            if depths is None:
+                depths = _dense_depth_from_anything(images, depth_device, depth_model_id)
+            control_strip = _concat_strip(
+                [_to_pil_depth(d) for d in depths],
+                height or image_strip.height,
+            ).convert("RGB")
+            controls.append(control_strip)
+        else:
+            raise ValueError(f"Unsupported controlnet id: {controlnet_id}")
+    return image_strip, controls, target_size
 
 
 def _parse_args():
@@ -395,9 +406,11 @@ def main():
     cam_to_index = {name: idx for idx, name in enumerate(cfg["data"]["cameras"])}
     images = [images_tensor[cam_to_index[name]] for name in cam_order]
     depth_device = torch.device(i2i_cfg.depth_device)
-    image_strip, control_strip, target_size = _build_control_image(
+    controlnet_ids = [item.id for item in i2i_cfg.control_nets]
+    control_scales = [item.scale for item in i2i_cfg.control_nets]
+    image_strip, control_strips, target_size = _build_control_images(
         images,
-        i2i_cfg.controlnet_id,
+        controlnet_ids,
         depth_device,
         i2i_cfg.depth_model_id,
         i2i_cfg.height,
@@ -405,14 +418,15 @@ def main():
 
     i2i = SdxlStripPanoramaI2I(
         model_id=i2i_cfg.model_id,
-        controlnet_id=i2i_cfg.controlnet_id,
+        controlnet_ids=controlnet_ids,
         enable_cpu_offload=i2i_cfg.cpu_offload,
         enable_sequential_offload=i2i_cfg.sequential_offload,
         enable_xformers=i2i_cfg.xformers,
     )
     os.makedirs(i2i_cfg.output_dir, exist_ok=True)
     image_strip.save(os.path.join(i2i_cfg.output_dir, "input_image.png"))
-    control_strip.save(os.path.join(i2i_cfg.output_dir, "control_map.png"))
+    for idx, control in enumerate(control_strips):
+        control.save(os.path.join(i2i_cfg.output_dir, f"control_map_{idx}.png"))
 
     result = i2i.generate(
         prompt=i2i_cfg.prompt,
@@ -422,9 +436,9 @@ def main():
         strength=i2i_cfg.strength,
         num_inference_steps=i2i_cfg.steps,
         guidance_scale=i2i_cfg.guidance_scale,
-        controlnet_conditioning_scale=i2i_cfg.controlnet_scale,
+        controlnet_conditioning_scale=control_scales,
         seed=i2i_cfg.seed,
-        control_image=control_strip,
+        control_image=control_strips,
     )
     blended = _blend_strip_segments(
         result,
