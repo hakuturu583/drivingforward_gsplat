@@ -14,7 +14,7 @@ uv run drivingforward-gsplat
 ```bash
 uv run python -m drivingforward_gsplat.i2i.sdxl_i2i \
   --prompt "sunset urban street, cinematic" \
-  --output sdxl_strip.png \
+  --output_dir output \
   --novel_view_mode MF \
   --sample_index 0
 ```
@@ -24,7 +24,7 @@ With tiling and CPU offload to reduce memory use:
 ```bash
 uv run python -m drivingforward_gsplat.i2i.sdxl_i2i \
   --prompt "sunset urban street, cinematic" \
-  --output sdxl_strip.png \
+  --output_dir output \
   --novel_view_mode MF \
   --sample_index 0 \
   --cpu_offload \
@@ -37,7 +37,7 @@ If you still see CUDA OOM, enable sequential offload and reduce tile size:
 ```bash
 uv run python -m drivingforward_gsplat.i2i.sdxl_i2i \
   --prompt "sunset urban street, cinematic" \
-  --output sdxl_strip.png \
+  --output_dir output \
   --novel_view_mode MF \
   --sample_index 0 \
   --cpu_offload \

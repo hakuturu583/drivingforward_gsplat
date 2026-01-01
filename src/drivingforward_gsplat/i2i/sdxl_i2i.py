@@ -354,7 +354,7 @@ def _parse_args():
     parser.add_argument("--config_file", default="configs/nuscenes/main.yaml")
     parser.add_argument("--novel_view_mode", default="MF", choices=("MF", "SF"))
     parser.add_argument("--prompt", required=True)
-    parser.add_argument("--output", default="sdxl_strip.png")
+    parser.add_argument("--output_dir", default="output")
     parser.add_argument("--sample_index", type=int, default=0)
     parser.add_argument("--height", type=int, default=None)
     parser.add_argument(
@@ -411,6 +411,16 @@ def main():
         enable_sequential_offload=args.sequential_offload,
         enable_xformers=args.xformers,
     )
+    os.makedirs(args.output_dir, exist_ok=True)
+    input_strip, _ = i2i.build_strip_panorama(
+        images, height=args.height, return_target_size=True
+    )
+    depth_strip = i2i.build_depth_panorama(
+        depths, height=args.height or input_strip.height
+    )
+    input_strip.save(os.path.join(args.output_dir, "input_image.png"))
+    depth_strip.save(os.path.join(args.output_dir, "depth_map.png"))
+
     result = i2i.generate(
         prompt=args.prompt,
         images=images,
@@ -424,7 +434,7 @@ def main():
         tile_overlap=args.tile_overlap,
         seed=args.seed,
     )
-    result.save(args.output)
+    result.save(os.path.join(args.output_dir, "output_image.png"))
 
 
 if __name__ == "__main__":
