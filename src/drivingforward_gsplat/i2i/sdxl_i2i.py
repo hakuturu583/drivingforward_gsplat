@@ -10,6 +10,7 @@ from diffusers import ControlNetModel, StableDiffusionXLControlNetImg2ImgPipelin
 
 from drivingforward_gsplat.dataset import EnvNuScenesDataset, get_transforms
 from drivingforward_gsplat.utils import misc as utils
+import os
 
 
 ImageLike = Union[Image.Image, np.ndarray, torch.Tensor]
