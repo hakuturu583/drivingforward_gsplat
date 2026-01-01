@@ -6,80 +6,15 @@ from typing import List, Optional, Sequence, Union
 import numpy as np
 import torch
 from PIL import Image
-
 from dotenv import load_dotenv
+
+from diffusers import ControlNetModel, StableDiffusionXLControlNetImg2ImgPipeline
 
 from drivingforward_gsplat.dataset import NuScenesdataset, get_transforms
 from drivingforward_gsplat.utils import misc as utils
 
 
 ImageLike = Union[Image.Image, np.ndarray, torch.Tensor]
-
-
-def _patch_diffusers_enable_gqa():
-    q = torch.randn(1, 1, 1, 1)
-    try:
-        torch.nn.functional.scaled_dot_product_attention(
-            q, q, q, enable_gqa=False
-        )
-        return
-    except TypeError:
-        pass
-
-    from diffusers.models import attention_dispatch as ad
-
-    if getattr(ad, "_patched_gqa", False):
-        return
-
-    def _native_attention_no_gqa(
-        query: torch.Tensor,
-        key: torch.Tensor,
-        value: torch.Tensor,
-        attn_mask: Optional[torch.Tensor] = None,
-        dropout_p: float = 0.0,
-        is_causal: bool = False,
-        scale: Optional[float] = None,
-        enable_gqa: bool = False,
-        return_lse: bool = False,
-        _parallel_config: Optional["ParallelConfig"] = None,
-    ) -> torch.Tensor:
-        if return_lse:
-            raise ValueError(
-                "Native attention backend does not support setting `return_lse=True`."
-            )
-        if _parallel_config is None:
-            query_t, key_t, value_t = (x.permute(0, 2, 1, 3) for x in (query, key, value))
-            out = torch.nn.functional.scaled_dot_product_attention(
-                query=query_t,
-                key=key_t,
-                value=value_t,
-                attn_mask=attn_mask,
-                dropout_p=dropout_p,
-                is_causal=is_causal,
-                scale=scale,
-            )
-            out = out.permute(0, 2, 1, 3)
-        else:
-            out = ad._templated_context_parallel_attention(
-                query,
-                key,
-                value,
-                attn_mask,
-                dropout_p,
-                is_causal,
-                scale,
-                enable_gqa,
-                return_lse,
-                forward_op=ad._native_attention_forward_op,
-                backward_op=ad._native_attention_backward_op,
-                _parallel_config=_parallel_config,
-            )
-        return out
-
-    ad._AttentionBackendRegistry._backends[ad.AttentionBackendName.NATIVE] = (
-        _native_attention_no_gqa
-    )
-    ad._patched_gqa = True
 
 
 def _tensor_to_numpy_uint8(tensor: torch.Tensor) -> np.ndarray:
@@ -170,34 +105,29 @@ def _concat_strip(images: Sequence[Image.Image], height: Optional[int]) -> Image
     return out
 
 
-class FluxStripPanoramaI2I:
+class SdxlStripPanoramaI2I:
     def __init__(
         self,
-        model_id: str = "black-forest-labs/FLUX.1-schnell",
-        controlnet_id: str = "XLabs-AI/flux-controlnet-depth-diffusers",
+        model_id: str = "stabilityai/stable-diffusion-xl-base-1.0",
+        controlnet_id: str = "diffusers/controlnet-depth-sdxl-1.0",
         device: Optional[str] = None,
-        torch_dtype: torch.dtype = torch.bfloat16,
+        torch_dtype: torch.dtype = torch.float16,
         enable_cpu_offload: bool = True,
         enable_sequential_offload: bool = False,
-        attn_backend: Optional[str] = None,
+        enable_xformers: bool = False,
     ) -> None:
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
         self.torch_dtype = torch_dtype
 
-        if attn_backend:
-            os.environ["DIFFUSERS_ATTN_BACKEND"] = attn_backend
-
-        from diffusers import FluxControlNetModel, FluxControlNetPipeline
-
-        _patch_diffusers_enable_gqa()
-        controlnet = FluxControlNetModel.from_pretrained(
+        controlnet = ControlNetModel.from_pretrained(
             controlnet_id, torch_dtype=torch_dtype
         )
-        self.pipe = FluxControlNetPipeline.from_pretrained(
+        self.pipe = StableDiffusionXLControlNetImg2ImgPipeline.from_pretrained(
             model_id, controlnet=controlnet, torch_dtype=torch_dtype
         )
+
         if device == "cuda" and enable_cpu_offload:
             if enable_sequential_offload:
                 self.pipe.enable_sequential_cpu_offload()
@@ -206,6 +136,12 @@ class FluxStripPanoramaI2I:
             self.pipe.enable_attention_slicing()
         else:
             self.pipe.to(device)
+
+        if enable_xformers:
+            try:
+                self.pipe.enable_xformers_memory_efficient_attention()
+            except (AttributeError, ImportError):
+                pass
 
     def build_strip_panorama(
         self,
@@ -239,9 +175,10 @@ class FluxStripPanoramaI2I:
         images: Sequence[ImageLike],
         depths: Sequence[ImageLike],
         height: Optional[int] = None,
-        num_inference_steps: int = 4,
-        guidance_scale: float = 3.5,
-        controlnet_conditioning_scale: float = 0.5,
+        strength: float = 0.6,
+        num_inference_steps: int = 30,
+        guidance_scale: float = 5.0,
+        controlnet_conditioning_scale: float = 1.0,
         tile_size: Optional[int] = None,
         tile_overlap: int = 64,
         seed: Optional[int] = None,
@@ -256,7 +193,9 @@ class FluxStripPanoramaI2I:
         if tile_size:
             result = self._generate_tiled(
                 prompt=prompt,
-                control_image=depth_strip,
+                image_strip=image_strip,
+                depth_strip=depth_strip,
+                strength=strength,
                 tile_size=tile_size,
                 tile_overlap=tile_overlap,
                 num_inference_steps=num_inference_steps,
@@ -274,7 +213,9 @@ class FluxStripPanoramaI2I:
 
         result = self.pipe(
             prompt=prompt,
+            image=image_strip,
             control_image=depth_strip,
+            strength=strength,
             num_inference_steps=num_inference_steps,
             guidance_scale=guidance_scale,
             controlnet_conditioning_scale=controlnet_conditioning_scale,
@@ -290,7 +231,9 @@ class FluxStripPanoramaI2I:
     def _generate_tiled(
         self,
         prompt: str,
-        control_image: Image.Image,
+        image_strip: Image.Image,
+        depth_strip: Image.Image,
+        strength: float,
         tile_size: int,
         tile_overlap: int,
         num_inference_steps: int,
@@ -298,7 +241,7 @@ class FluxStripPanoramaI2I:
         controlnet_conditioning_scale: float,
         seed: Optional[int],
     ) -> Image.Image:
-        width, height = control_image.size
+        width, height = depth_strip.size
         tile_size = min(tile_size, width, height)
         stride = max(1, tile_size - tile_overlap)
 
@@ -322,7 +265,8 @@ class FluxStripPanoramaI2I:
         for idx, (x0, y0) in enumerate(tiles):
             x1 = x0 + tile_size
             y1 = y0 + tile_size
-            tile = control_image.crop((x0, y0, x1, y1))
+            image_tile = image_strip.crop((x0, y0, x1, y1))
+            depth_tile = depth_strip.crop((x0, y0, x1, y1))
 
             generator = None
             if seed is not None:
@@ -332,7 +276,9 @@ class FluxStripPanoramaI2I:
                 torch.cuda.empty_cache()
             result = self.pipe(
                 prompt=prompt,
-                control_image=tile,
+                image=image_tile,
+                control_image=depth_tile,
+                strength=strength,
                 num_inference_steps=num_inference_steps,
                 guidance_scale=guidance_scale,
                 controlnet_conditioning_scale=controlnet_conditioning_scale,
@@ -447,30 +393,28 @@ def _build_env_dataset(cfg, mode: str):
 
 
 def _parse_args():
-    parser = argparse.ArgumentParser(description="FLUX strip panorama i2i")
+    parser = argparse.ArgumentParser(description="SDXL strip panorama i2i")
     parser.add_argument("--config_file", default="configs/nuscenes/main.yaml")
     parser.add_argument("--novel_view_mode", default="MF", choices=("MF", "SF"))
     parser.add_argument("--prompt", required=True)
-    parser.add_argument("--output", default="flux_strip.png")
+    parser.add_argument("--output", default="sdxl_strip.png")
     parser.add_argument("--sample_index", type=int, default=0)
     parser.add_argument("--height", type=int, default=None)
-    parser.add_argument("--model_id", default="black-forest-labs/FLUX.1-schnell")
     parser.add_argument(
-        "--controlnet_id",
-        default="XLabs-AI/flux-controlnet-depth-diffusers",
+        "--model_id", default="stabilityai/stable-diffusion-xl-base-1.0"
     )
-    parser.add_argument("--steps", type=int, default=4)
-    parser.add_argument("--guidance_scale", type=float, default=3.5)
-    parser.add_argument("--controlnet_scale", type=float, default=0.5)
+    parser.add_argument(
+        "--controlnet_id", default="diffusers/controlnet-depth-sdxl-1.0"
+    )
+    parser.add_argument("--strength", type=float, default=0.6)
+    parser.add_argument("--steps", type=int, default=30)
+    parser.add_argument("--guidance_scale", type=float, default=5.0)
+    parser.add_argument("--controlnet_scale", type=float, default=1.0)
     parser.add_argument("--tile_size", type=int, default=None)
     parser.add_argument("--tile_overlap", type=int, default=64)
     parser.add_argument("--cpu_offload", action="store_true")
     parser.add_argument("--sequential_offload", action="store_true")
-    parser.add_argument(
-        "--attn_backend",
-        default=None,
-        help="Diffusers attention backend override (e.g. flash, xformers, native).",
-    )
+    parser.add_argument("--xformers", action="store_true")
     parser.add_argument("--seed", type=int, default=None)
     return parser.parse_args()
 
@@ -503,18 +447,19 @@ def main():
     images = [images_tensor[i] for i in range(images_tensor.shape[0])]
     depths = [depths_tensor[i] for i in range(depths_tensor.shape[0])]
 
-    i2i = FluxStripPanoramaI2I(
+    i2i = SdxlStripPanoramaI2I(
         model_id=args.model_id,
         controlnet_id=args.controlnet_id,
         enable_cpu_offload=args.cpu_offload,
         enable_sequential_offload=args.sequential_offload,
-        attn_backend=args.attn_backend,
+        enable_xformers=args.xformers,
     )
     result = i2i.generate(
         prompt=args.prompt,
         images=images,
         depths=depths,
         height=args.height,
+        strength=args.strength,
         num_inference_steps=args.steps,
         guidance_scale=args.guidance_scale,
         controlnet_conditioning_scale=args.controlnet_scale,

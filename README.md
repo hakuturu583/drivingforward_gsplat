@@ -9,12 +9,12 @@ export PYTHONUTF8=1
 uv run drivingforward-gsplat
 ```
 
-### Flux i2i strip panorama
+### SDXL i2i strip panorama
 
 ```bash
-uv run python -m drivingforward_gsplat.i2i.flux_i2i \
+uv run python -m drivingforward_gsplat.i2i.sdxl_i2i \
   --prompt "sunset urban street, cinematic" \
-  --output flux_strip.png \
+  --output sdxl_strip.png \
   --novel_view_mode MF \
   --sample_index 0
 ```
@@ -22,9 +22,9 @@ uv run python -m drivingforward_gsplat.i2i.flux_i2i \
 With tiling and CPU offload to reduce memory use:
 
 ```bash
-uv run python -m drivingforward_gsplat.i2i.flux_i2i \
+uv run python -m drivingforward_gsplat.i2i.sdxl_i2i \
   --prompt "sunset urban street, cinematic" \
-  --output flux_strip.png \
+  --output sdxl_strip.png \
   --novel_view_mode MF \
   --sample_index 0 \
   --cpu_offload \
@@ -35,9 +35,9 @@ uv run python -m drivingforward_gsplat.i2i.flux_i2i \
 If you still see CUDA OOM, enable sequential offload and reduce tile size:
 
 ```bash
-uv run python -m drivingforward_gsplat.i2i.flux_i2i \
+uv run python -m drivingforward_gsplat.i2i.sdxl_i2i \
   --prompt "sunset urban street, cinematic" \
-  --output flux_strip.png \
+  --output sdxl_strip.png \
   --novel_view_mode MF \
   --sample_index 0 \
   --cpu_offload \
