@@ -148,6 +148,10 @@ class SdxlStripPanoramaI2I:
         enable_cpu_offload: bool = True,
         enable_sequential_offload: bool = False,
         enable_xformers: bool = False,
+        ip_adapter_model_id: Optional[str] = None,
+        ip_adapter_subfolder: Optional[str] = None,
+        ip_adapter_weight_name: Optional[str] = None,
+        ip_adapter_scale: float = 1.0,
     ) -> None:
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -176,6 +180,14 @@ class SdxlStripPanoramaI2I:
                 self.pipe.enable_xformers_memory_efficient_attention()
             except (AttributeError, ImportError):
                 pass
+        if ip_adapter_model_id:
+            ip_adapter_kwargs = {}
+            if ip_adapter_subfolder:
+                ip_adapter_kwargs["subfolder"] = ip_adapter_subfolder
+            if ip_adapter_weight_name:
+                ip_adapter_kwargs["weight_name"] = ip_adapter_weight_name
+            self.pipe.load_ip_adapter(ip_adapter_model_id, **ip_adapter_kwargs)
+            self.pipe.set_ip_adapter_scale(ip_adapter_scale)
 
     def build_strip_panorama(
         self,
@@ -220,6 +232,7 @@ class SdxlStripPanoramaI2I:
         controlnet_conditioning_scale: float = 1.0,
         seed: Optional[int] = None,
         control_image: Optional[Image.Image] = None,
+        ip_adapter_images: Optional[Sequence[Image.Image]] = None,
     ) -> Image.Image:
         image_strip, target_size = self.build_strip_panorama(
             images, height=height, return_target_size=True
@@ -239,19 +252,22 @@ class SdxlStripPanoramaI2I:
         if seed is not None:
             generator = torch.Generator(device=self.device).manual_seed(seed)
 
-        result = self.pipe(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            image=image_strip,
-            control_image=control_strip,
-            strength=strength,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=guidance_scale,
-            controlnet_conditioning_scale=controlnet_conditioning_scale,
-            generator=generator,
-            height=control_for_size.height,
-            width=control_for_size.width,
-        )
+        pipe_kwargs = {
+            "prompt": prompt,
+            "negative_prompt": negative_prompt,
+            "image": image_strip,
+            "control_image": control_strip,
+            "strength": strength,
+            "num_inference_steps": num_inference_steps,
+            "guidance_scale": guidance_scale,
+            "controlnet_conditioning_scale": controlnet_conditioning_scale,
+            "generator": generator,
+            "height": control_for_size.height,
+            "width": control_for_size.width,
+        }
+        if ip_adapter_images:
+            pipe_kwargs["ip_adapter_image"] = ip_adapter_images
+        result = self.pipe(**pipe_kwargs)
         output = result.images[0]
         if height is not None and output.size != target_size:
             output = output.resize(target_size, resample=Image.BICUBIC)
@@ -430,18 +446,6 @@ def main():
         i2i_cfg.height,
     )
 
-    i2i = SdxlStripPanoramaI2I(
-        model_id=i2i_cfg.model_id,
-        controlnet_ids=controlnet_ids,
-        enable_cpu_offload=i2i_cfg.cpu_offload,
-        enable_sequential_offload=i2i_cfg.sequential_offload,
-        enable_xformers=i2i_cfg.xformers,
-    )
-    os.makedirs(i2i_cfg.output_dir, exist_ok=True)
-    image_strip.save(os.path.join(i2i_cfg.output_dir, "input_image.png"))
-    for idx, control in enumerate(control_strips):
-        control.save(os.path.join(i2i_cfg.output_dir, f"control_map_{idx}.png"))
-
     prompt_path = (
         args.prompt_config
         if os.path.isabs(args.prompt_config)
@@ -450,6 +454,35 @@ def main():
     prompt_cfg = PromptConfig.from_yaml(prompt_path)
     prompt = prompt_cfg.prompt
     negative_prompt = prompt_cfg.negative_prompt
+    use_ip_adapter = bool(prompt_cfg.reference_images)
+    if use_ip_adapter and not i2i_cfg.ip_adapter_model_id:
+        raise ValueError(
+            "reference_images provided in prompt config but ip_adapter_model_id is not set."
+        )
+    reference_images = []
+    for ref_path in prompt_cfg.reference_images:
+        abs_path = (
+            ref_path
+            if os.path.isabs(ref_path)
+            else os.path.join(repo_root, ref_path)
+        )
+        reference_images.append(Image.open(abs_path).convert("RGB"))
+
+    i2i = SdxlStripPanoramaI2I(
+        model_id=i2i_cfg.model_id,
+        controlnet_ids=controlnet_ids,
+        enable_cpu_offload=i2i_cfg.cpu_offload,
+        enable_sequential_offload=i2i_cfg.sequential_offload,
+        enable_xformers=i2i_cfg.xformers,
+        ip_adapter_model_id=i2i_cfg.ip_adapter_model_id if use_ip_adapter else None,
+        ip_adapter_subfolder=i2i_cfg.ip_adapter_subfolder,
+        ip_adapter_weight_name=i2i_cfg.ip_adapter_weight_name,
+        ip_adapter_scale=i2i_cfg.ip_adapter_scale,
+    )
+    os.makedirs(i2i_cfg.output_dir, exist_ok=True)
+    image_strip.save(os.path.join(i2i_cfg.output_dir, "input_image.png"))
+    for idx, control in enumerate(control_strips):
+        control.save(os.path.join(i2i_cfg.output_dir, f"control_map_{idx}.png"))
     result = i2i.generate(
         prompt=prompt,
         negative_prompt=negative_prompt,
@@ -462,6 +495,7 @@ def main():
         controlnet_conditioning_scale=control_scales,
         seed=i2i_cfg.seed,
         control_image=control_strips,
+        ip_adapter_images=reference_images or None,
     )
     blended = _blend_strip_segments(
         result,

@@ -1,5 +1,5 @@
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import List, Optional
 
 import yaml
 
@@ -8,6 +8,7 @@ import yaml
 class PromptConfig:
     prompt: str
     negative_prompt: Optional[str] = None
+    reference_images: List[str] = field(default_factory=list)
 
     @classmethod
     def from_yaml(cls, path: str) -> "PromptConfig":
@@ -16,4 +17,11 @@ class PromptConfig:
         prompt = data.get("prompt")
         if not prompt:
             raise ValueError(f"Missing prompt in {path}")
-        return cls(prompt=prompt, negative_prompt=data.get("negative_prompt"))
+        ref_images = data.get("reference_images") or []
+        if isinstance(ref_images, str):
+            ref_images = [ref_images]
+        return cls(
+            prompt=prompt,
+            negative_prompt=data.get("negative_prompt"),
+            reference_images=ref_images,
+        )

@@ -19,6 +19,10 @@ class SdxlI2IConfig:
     height: Optional[int] = None
     blend_width: int = 0
     model_id: str = "stabilityai/stable-diffusion-xl-base-1.0"
+    ip_adapter_model_id: Optional[str] = None
+    ip_adapter_subfolder: Optional[str] = None
+    ip_adapter_weight_name: Optional[str] = None
+    ip_adapter_scale: float = 1.0
     control_nets: List[ControlNetConfig] = field(
         default_factory=lambda: [
             ControlNetConfig(id="diffusers/controlnet-depth-sdxl-1.0")
