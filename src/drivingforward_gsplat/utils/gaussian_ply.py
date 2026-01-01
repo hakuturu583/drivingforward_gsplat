@@ -73,13 +73,12 @@ def _extract_gaussians_for_render(
     return xyz, rot, scale, opacity, sh
 
 
-def save_gaussians_as_ply(
+def _gather_gaussians(
     outputs,
-    output_path: str,
     cam_num: int,
     mode: str,
-    sample_idx: int = 0,
-) -> Optional[str]:
+    sample_idx: int,
+) -> Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
     cams = range(cam_num) if mode == "MF" else range(cam_num)
     xyz_list = []
     rot_list = []
@@ -107,6 +106,20 @@ def save_gaussians_as_ply(
     scale = torch.cat(scale_list, dim=0)
     opacity = torch.cat(opacity_list, dim=0)
     sh = torch.cat(sh_list, dim=0)
+    return xyz, rot, scale, opacity, sh
+
+
+def save_gaussians_as_ply(
+    outputs,
+    output_path: str,
+    cam_num: int,
+    mode: str,
+    sample_idx: int = 0,
+) -> Optional[str]:
+    gathered = _gather_gaussians(outputs, cam_num, mode, sample_idx)
+    if gathered is None:
+        return None
+    xyz, rot, scale, opacity, sh = gathered
     sh = sh.permute(0, 2, 1).reshape(sh.shape[0], -1)
 
     xyz_np = xyz.detach().cpu().numpy().astype(np.float32)
@@ -145,6 +158,85 @@ def save_gaussians_as_ply(
     data["opacity"] = opacity_np[:, 0]
     for idx in range(sh_dim):
         data[f"sh_{idx}"] = sh_np[:, idx]
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    PlyData([PlyElement.describe(data, "vertex")], text=False).write(output_path)
+    return output_path
+
+
+def save_gaussians_as_inria_ply(
+    outputs,
+    output_path: str,
+    cam_num: int,
+    mode: str,
+    sample_idx: int = 0,
+) -> Optional[str]:
+    gathered = _gather_gaussians(outputs, cam_num, mode, sample_idx)
+    if gathered is None:
+        return None
+    xyz, rot, scale, opacity, sh = gathered
+
+    scale = torch.clamp(scale, min=1e-8)
+    opacity = torch.clamp(opacity, min=1e-6, max=1.0 - 1e-6)
+    scale_log = torch.log(scale)
+    opacity_logit = torch.log(opacity / (1.0 - opacity))
+
+    xyz_np = xyz.detach().cpu().numpy().astype(np.float32)
+    rot_np = rot.detach().cpu().numpy().astype(np.float32)
+    scale_np = scale_log.detach().cpu().numpy().astype(np.float32)
+    opacity_np = opacity_logit.detach().cpu().numpy().astype(np.float32)
+    sh_np = sh.detach().cpu().numpy().astype(np.float32)
+
+    num = xyz_np.shape[0]
+    d_sh = sh_np.shape[2]
+    rest_dim = max(d_sh - 1, 0)
+    dtype_fields = [
+        ("x", "f4"),
+        ("y", "f4"),
+        ("z", "f4"),
+        ("nx", "f4"),
+        ("ny", "f4"),
+        ("nz", "f4"),
+        ("f_dc_0", "f4"),
+        ("f_dc_1", "f4"),
+        ("f_dc_2", "f4"),
+    ] + [(f"f_rest_{idx}", "f4") for idx in range(rest_dim * 3)] + [
+        ("opacity", "f4"),
+        ("scale_0", "f4"),
+        ("scale_1", "f4"),
+        ("scale_2", "f4"),
+        ("rot_0", "f4"),
+        ("rot_1", "f4"),
+        ("rot_2", "f4"),
+        ("rot_3", "f4"),
+    ]
+
+    data = np.zeros(num, dtype=dtype_fields)
+    data["x"] = xyz_np[:, 0]
+    data["y"] = xyz_np[:, 1]
+    data["z"] = xyz_np[:, 2]
+    data["nx"] = 0.0
+    data["ny"] = 0.0
+    data["nz"] = 0.0
+
+    dc = sh_np[:, :, 0]
+    data["f_dc_0"] = dc[:, 0]
+    data["f_dc_1"] = dc[:, 1]
+    data["f_dc_2"] = dc[:, 2]
+
+    if rest_dim:
+        rest = sh_np[:, :, 1:].reshape(num, -1)
+        for idx in range(rest.shape[1]):
+            data[f"f_rest_{idx}"] = rest[:, idx]
+
+    data["opacity"] = opacity_np[:, 0]
+    data["scale_0"] = scale_np[:, 0]
+    data["scale_1"] = scale_np[:, 1]
+    data["scale_2"] = scale_np[:, 2]
+    data["rot_0"] = rot_np[:, 0]
+    data["rot_1"] = rot_np[:, 1]
+    data["rot_2"] = rot_np[:, 2]
+    data["rot_3"] = rot_np[:, 3]
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     PlyData([PlyElement.describe(data, "vertex")], text=False).write(output_path)
