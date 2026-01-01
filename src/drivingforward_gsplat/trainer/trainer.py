@@ -16,10 +16,16 @@ from einops import reduce
 from PIL import Image
 from pathlib import Path
 from einops import rearrange, repeat
+import os
 from typing import Union
 import numpy as np
 
 from tqdm import tqdm
+
+from drivingforward_gsplat.utils.gaussian_ply import (
+    save_gaussians_as_inria_ply,
+    save_gaussians_as_ply,
+)
 
 FloatImage = Union[
     Float[Tensor, "height width"],
@@ -176,6 +182,36 @@ class DrivingForwardTrainer:
             print(
                 f"avg PSNR: {avg_reconstruction_metric['psnr']/count:.4f}, avg SSIM: {avg_reconstruction_metric['ssim']/count:.4f}, avg LPIPS: {avg_reconstruction_metric['lpips']/count:.4f}"
             )
+
+            if getattr(model, "gaussian", False):
+                tokens = inputs.get("token")
+                if tokens is None:
+                    tokens = [
+                        f"batch{batch_idx}_idx{idx}"
+                        for idx in range(outputs[("cam", 0)][("xyz", 0, 0)].shape[0])
+                    ]
+                for sample_idx, token in enumerate(tokens):
+                    token_safe = str(token).replace("/", "_").replace(os.sep, "_")
+                    output_path = os.path.join(
+                        self.log_dir, "gaussians", token_safe, "output.ply"
+                    )
+                    save_gaussians_as_ply(
+                        outputs,
+                        output_path,
+                        model.num_cams,
+                        model.novel_view_mode,
+                        sample_idx=sample_idx,
+                    )
+                    output_inria_path = os.path.join(
+                        self.log_dir, "gaussians", token_safe, "output_inria.ply"
+                    )
+                    save_gaussians_as_inria_ply(
+                        outputs,
+                        output_inria_path,
+                        model.num_cams,
+                        model.novel_view_mode,
+                        sample_idx=sample_idx,
+                    )
 
         avg_reconstruction_metric["psnr"] /= len(eval_dataloader)
         avg_reconstruction_metric["ssim"] /= len(eval_dataloader)
