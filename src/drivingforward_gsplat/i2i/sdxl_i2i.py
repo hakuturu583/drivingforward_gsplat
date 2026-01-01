@@ -109,6 +109,34 @@ def _concat_strip(images: Sequence[Image.Image], height: Optional[int]) -> Image
     return out
 
 
+def _blend_strip_segments(
+    image_strip: Image.Image, widths: Sequence[int], blend_width: int
+) -> Image.Image:
+    if blend_width <= 0:
+        return image_strip
+    strip = np.array(image_strip, dtype=np.float32)
+    height, width, channels = strip.shape
+    offsets = [0]
+    for w in widths:
+        offsets.append(offsets[-1] + w)
+    for idx in range(1, len(offsets) - 1):
+        left = offsets[idx - 1]
+        mid = offsets[idx]
+        right = offsets[idx + 1]
+        bw = min(blend_width, mid - left, right - mid)
+        if bw <= 0:
+            continue
+        l_slice = strip[:, mid - bw : mid, :]
+        r_slice = strip[:, mid : mid + bw, :]
+        alpha = (1.0 - np.cos(np.linspace(0, math.pi, bw))) * 0.5
+        alpha = alpha.reshape(1, bw, 1)
+        blended = l_slice * (1.0 - alpha) + r_slice * alpha
+        strip[:, mid - bw : mid, :] = blended
+        strip[:, mid : mid + bw, :] = blended
+    strip = np.clip(strip, 0, 255).astype(np.uint8)
+    return Image.fromarray(strip, mode="RGB")
+
+
 class SdxlStripPanoramaI2I:
     def __init__(
         self,
@@ -151,6 +179,7 @@ class SdxlStripPanoramaI2I:
         self,
         images: Sequence[ImageLike],
         height: Optional[int] = None,
+        blend_width: int = 0,
         return_target_size: bool = False,
     ) -> Image.Image:
         if len(images) != 6:
@@ -164,7 +193,10 @@ class SdxlStripPanoramaI2I:
         return strip
 
     def build_depth_panorama(
-        self, depths: Sequence[ImageLike], height: Optional[int] = None
+        self,
+        depths: Sequence[ImageLike],
+        height: Optional[int] = None,
+        blend_width: int = 0,
     ) -> Image.Image:
         if len(depths) != 6:
             raise ValueError(f"Expected 6 depth maps, got {len(depths)}")
@@ -314,7 +346,8 @@ def _build_control_image(
 
     depths = _dense_depth_from_anything(images, depth_device, depth_model_id)
     control_strip = _concat_strip(
-        [_to_pil_depth(d) for d in depths], height or image_strip.height
+        [_to_pil_depth(d) for d in depths],
+        height or image_strip.height,
     ).convert("RGB")
     return image_strip, control_strip, target_size
 
@@ -362,7 +395,7 @@ def main():
     cam_to_index = {name: idx for idx, name in enumerate(cfg["data"]["cameras"])}
     images = [images_tensor[cam_to_index[name]] for name in cam_order]
     depth_device = torch.device(i2i_cfg.depth_device)
-    image_strip, control_strip, _ = _build_control_image(
+    image_strip, control_strip, target_size = _build_control_image(
         images,
         i2i_cfg.controlnet_id,
         depth_device,
@@ -393,7 +426,12 @@ def main():
         seed=i2i_cfg.seed,
         control_image=control_strip,
     )
-    result.save(os.path.join(i2i_cfg.output_dir, "output_image.png"))
+    blended = _blend_strip_segments(
+        result,
+        widths=[img.width for img in [_to_pil_rgb(img) for img in images]],
+        blend_width=i2i_cfg.blend_width,
+    )
+    blended.save(os.path.join(i2i_cfg.output_dir, "output_image.png"))
 
 
 if __name__ == "__main__":

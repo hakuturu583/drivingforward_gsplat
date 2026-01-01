@@ -12,6 +12,7 @@ class SdxlI2IConfig:
     novel_view_mode: str = "MF"
     sample_index: int = 0
     height: Optional[int] = None
+    blend_width: int = 0
     model_id: str = "stabilityai/stable-diffusion-xl-base-1.0"
     controlnet_id: str = "diffusers/controlnet-depth-sdxl-1.0"
     depth_model_id: str = "depth-anything/DA3METRIC-LARGE"
