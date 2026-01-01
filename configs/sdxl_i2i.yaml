@@ -1,0 +1,20 @@
+prompt: "sunset urban street, cinematic"
+config_file: "configs/nuscenes/main.yaml"
+output_dir: "output"
+novel_view_mode: "MF"
+sample_index: 0
+height: null
+model_id: "stabilityai/stable-diffusion-xl-base-1.0"
+controlnet_id: "diffusers/controlnet-depth-sdxl-1.0"
+torchscript_dir: "torchscript"
+depth_device: "cuda"
+strength: 0.6
+steps: 30
+guidance_scale: 5.0
+controlnet_scale: 1.0
+tile_size: null
+tile_overlap: 64
+cpu_offload: false
+sequential_offload: false
+xformers: false
+seed: null

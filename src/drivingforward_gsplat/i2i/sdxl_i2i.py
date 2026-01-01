@@ -12,6 +12,7 @@ from huggingface_hub import snapshot_download
 
 from drivingforward_gsplat.dataset import EnvNuScenesDataset, get_transforms
 from drivingforward_gsplat.utils import misc as utils
+from drivingforward_gsplat.i2i.sdxl_i2i_config import SdxlI2IConfig
 
 
 ImageLike = Union[Image.Image, np.ndarray, torch.Tensor]
@@ -501,47 +502,26 @@ def _dense_depth_from_network(sample, cfg, torchscript_dir, device):
 
 def _parse_args():
     parser = argparse.ArgumentParser(description="SDXL strip panorama i2i")
-    parser.add_argument("--config_file", default="configs/nuscenes/main.yaml")
-    parser.add_argument("--novel_view_mode", default="MF", choices=("MF", "SF"))
-    parser.add_argument("--prompt", required=True)
-    parser.add_argument("--output_dir", default="output")
-    parser.add_argument("--sample_index", type=int, default=0)
-    parser.add_argument("--height", type=int, default=None)
-    parser.add_argument(
-        "--model_id", default="stabilityai/stable-diffusion-xl-base-1.0"
-    )
-    parser.add_argument(
-        "--controlnet_id", default="diffusers/controlnet-depth-sdxl-1.0"
-    )
-    parser.add_argument("--torchscript_dir", default="torchscript")
-    parser.add_argument("--depth_device", default="cuda")
-    parser.add_argument("--strength", type=float, default=0.6)
-    parser.add_argument("--steps", type=int, default=30)
-    parser.add_argument("--guidance_scale", type=float, default=5.0)
-    parser.add_argument("--controlnet_scale", type=float, default=1.0)
-    parser.add_argument("--tile_size", type=int, default=None)
-    parser.add_argument("--tile_overlap", type=int, default=64)
-    parser.add_argument("--cpu_offload", action="store_true")
-    parser.add_argument("--sequential_offload", action="store_true")
-    parser.add_argument("--xformers", action="store_true")
-    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--config", required=True, help="Path to SDXL i2i yaml config.")
     return parser.parse_args()
 
 
 def main():
     args = _parse_args()
     repo_root = os.getcwd()
+    cfg_path = args.config if os.path.isabs(args.config) else os.path.join(repo_root, args.config)
+    i2i_cfg = SdxlI2IConfig.from_yaml(cfg_path)
     config_file = (
-        args.config_file
-        if os.path.isabs(args.config_file)
-        else os.path.join(repo_root, args.config_file)
+        i2i_cfg.config_file
+        if os.path.isabs(i2i_cfg.config_file)
+        else os.path.join(repo_root, i2i_cfg.config_file)
     )
 
     cfg = utils.get_config(
         config_file,
         mode="eval",
         weight_path=repo_root,
-        novel_view_mode=args.novel_view_mode,
+        novel_view_mode=i2i_cfg.novel_view_mode,
     )
     dataset = _build_env_dataset(cfg, "eval")
 
@@ -550,49 +530,49 @@ def main():
             f"Expected 6 cameras for strip panorama, got {len(cfg['data']['cameras'])}"
         )
 
-    sample = dataset[args.sample_index]
+    sample = dataset[i2i_cfg.sample_index]
     images_tensor = sample[("color", 0, 0)]
     images = [images_tensor[i] for i in range(images_tensor.shape[0])]
     torchscript_dir = (
-        args.torchscript_dir
-        if os.path.isabs(args.torchscript_dir)
-        else os.path.join(repo_root, args.torchscript_dir)
+        i2i_cfg.torchscript_dir
+        if os.path.isabs(i2i_cfg.torchscript_dir)
+        else os.path.join(repo_root, i2i_cfg.torchscript_dir)
     )
     _ensure_torchscript_modules(torchscript_dir)
-    depth_device = torch.device(args.depth_device)
+    depth_device = torch.device(i2i_cfg.depth_device)
     depths = _dense_depth_from_network(sample, cfg, torchscript_dir, depth_device)
 
     i2i = SdxlStripPanoramaI2I(
-        model_id=args.model_id,
-        controlnet_id=args.controlnet_id,
-        enable_cpu_offload=args.cpu_offload,
-        enable_sequential_offload=args.sequential_offload,
-        enable_xformers=args.xformers,
+        model_id=i2i_cfg.model_id,
+        controlnet_id=i2i_cfg.controlnet_id,
+        enable_cpu_offload=i2i_cfg.cpu_offload,
+        enable_sequential_offload=i2i_cfg.sequential_offload,
+        enable_xformers=i2i_cfg.xformers,
     )
-    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(i2i_cfg.output_dir, exist_ok=True)
     input_strip, _ = i2i.build_strip_panorama(
-        images, height=args.height, return_target_size=True
+        images, height=i2i_cfg.height, return_target_size=True
     )
     depth_strip = i2i.build_depth_panorama(
-        depths, height=args.height or input_strip.height
+        depths, height=i2i_cfg.height or input_strip.height
     )
-    input_strip.save(os.path.join(args.output_dir, "input_image.png"))
-    depth_strip.save(os.path.join(args.output_dir, "depth_map.png"))
+    input_strip.save(os.path.join(i2i_cfg.output_dir, "input_image.png"))
+    depth_strip.save(os.path.join(i2i_cfg.output_dir, "depth_map.png"))
 
     result = i2i.generate(
-        prompt=args.prompt,
+        prompt=i2i_cfg.prompt,
         images=images,
         depths=depths,
-        height=args.height,
-        strength=args.strength,
-        num_inference_steps=args.steps,
-        guidance_scale=args.guidance_scale,
-        controlnet_conditioning_scale=args.controlnet_scale,
-        tile_size=args.tile_size,
-        tile_overlap=args.tile_overlap,
-        seed=args.seed,
+        height=i2i_cfg.height,
+        strength=i2i_cfg.strength,
+        num_inference_steps=i2i_cfg.steps,
+        guidance_scale=i2i_cfg.guidance_scale,
+        controlnet_conditioning_scale=i2i_cfg.controlnet_scale,
+        tile_size=i2i_cfg.tile_size,
+        tile_overlap=i2i_cfg.tile_overlap,
+        seed=i2i_cfg.seed,
     )
-    result.save(os.path.join(args.output_dir, "output_image.png"))
+    result.save(os.path.join(i2i_cfg.output_dir, "output_image.png"))
 
 
 if __name__ == "__main__":
