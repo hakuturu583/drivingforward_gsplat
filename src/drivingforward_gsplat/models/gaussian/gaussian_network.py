@@ -1,4 +1,3 @@
-
 import torch
 from torch import nn
 from .extractor import UnetExtractor, ResidualBlock
@@ -6,7 +5,7 @@ from einops import rearrange
 
 
 class GaussianNetwork(nn.Module):
-    def __init__(self, rgb_dim=3, depth_dim=1, norm_fn='group'):
+    def __init__(self, rgb_dim=3, depth_dim=1, norm_fn="group"):
         super().__init__()
         self.rgb_dims = [64, 64, 128]
         self.depth_dims = [32, 48, 96]
@@ -22,26 +21,42 @@ class GaussianNetwork(nn.Module):
             persistent=False,
         )
         for degree in range(1, self.sh_degree + 1):
-            self.sh_mask[degree**2 : (degree + 1) ** 2] = 0.1 * 0.25**degree
+            self.sh_mask[degree ** 2 : (degree + 1) ** 2] = 0.1 * 0.25 ** degree
 
-        self.depth_encoder = UnetExtractor(in_channel=depth_dim, encoder_dim=self.depth_dims)
+        self.depth_encoder = UnetExtractor(
+            in_channel=depth_dim, encoder_dim=self.depth_dims
+        )
 
         self.decoder3 = nn.Sequential(
-            ResidualBlock(self.rgb_dims[2]+self.depth_dims[2], self.decoder_dims[2], norm_fn=norm_fn),
-            ResidualBlock(self.decoder_dims[2], self.decoder_dims[2], norm_fn=norm_fn)
+            ResidualBlock(
+                self.rgb_dims[2] + self.depth_dims[2],
+                self.decoder_dims[2],
+                norm_fn=norm_fn,
+            ),
+            ResidualBlock(self.decoder_dims[2], self.decoder_dims[2], norm_fn=norm_fn),
         )
 
         self.decoder2 = nn.Sequential(
-            ResidualBlock(self.rgb_dims[1]+self.depth_dims[1]+self.decoder_dims[2], self.decoder_dims[1], norm_fn=norm_fn),
-            ResidualBlock(self.decoder_dims[1], self.decoder_dims[1], norm_fn=norm_fn)
+            ResidualBlock(
+                self.rgb_dims[1] + self.depth_dims[1] + self.decoder_dims[2],
+                self.decoder_dims[1],
+                norm_fn=norm_fn,
+            ),
+            ResidualBlock(self.decoder_dims[1], self.decoder_dims[1], norm_fn=norm_fn),
         )
 
         self.decoder1 = nn.Sequential(
-            ResidualBlock(self.rgb_dims[0]+self.depth_dims[0]+self.decoder_dims[1], self.decoder_dims[0], norm_fn=norm_fn),
-            ResidualBlock(self.decoder_dims[0], self.decoder_dims[0], norm_fn=norm_fn)
+            ResidualBlock(
+                self.rgb_dims[0] + self.depth_dims[0] + self.decoder_dims[1],
+                self.decoder_dims[0],
+                norm_fn=norm_fn,
+            ),
+            ResidualBlock(self.decoder_dims[0], self.decoder_dims[0], norm_fn=norm_fn),
         )
         self.up = nn.Upsample(scale_factor=2, mode="bilinear")
-        self.out_conv = nn.Conv2d(self.decoder_dims[0]+rgb_dim+1, self.head_dim, kernel_size=3, padding=1)
+        self.out_conv = nn.Conv2d(
+            self.decoder_dims[0] + rgb_dim + 1, self.head_dim, kernel_size=3, padding=1
+        )
         self.out_relu = nn.ReLU(inplace=True)
 
         self.rot_head = nn.Sequential(
@@ -53,13 +68,13 @@ class GaussianNetwork(nn.Module):
             nn.Conv2d(self.head_dim, self.head_dim, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(self.head_dim, 3, kernel_size=1),
-            nn.Softplus(beta=100)
+            nn.Softplus(beta=100),
         )
         self.opacity_head = nn.Sequential(
             nn.Conv2d(self.head_dim, self.head_dim, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(self.head_dim, 1, kernel_size=1),
-            nn.Sigmoid()
+            nn.Sigmoid(),
         )
         self.sh_head = nn.Sequential(
             nn.Conv2d(self.head_dim, self.head_dim, kernel_size=3, padding=1),
@@ -107,7 +122,8 @@ class GaussianNetwork(nn.Module):
         # sh_out: [(b * v), C, H, W]
 
         sh_out = rearrange(
-            sh_out, "n c h w -> n (h w) c",
+            sh_out,
+            "n c h w -> n (h w) c",
         )
         sh_out = rearrange(
             sh_out,
@@ -120,6 +136,5 @@ class GaussianNetwork(nn.Module):
 
         # sh_out = sh_out.broadcast_to(sh_out.shape) * self.sh_mask
         sh_out = sh_out * self.sh_mask
-        
 
         return rot_out, scale_out, opacity_out, sh_out

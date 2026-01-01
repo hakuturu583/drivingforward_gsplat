@@ -126,9 +126,10 @@ def parse_crop_borders(borders, shape):
             )
     else:
         raise NotImplementedError("Crop tuple must have 2 or 4 values.")
-    assert 0 <= borders[0] < borders[2] <= shape[1] and 0 <= borders[1] < borders[
-        3
-    ] <= shape[0], f"Crop borders {borders} are invalid"
+    assert (
+        0 <= borders[0] < borders[2] <= shape[1]
+        and 0 <= borders[1] < borders[3] <= shape[0]
+    ), f"Crop borders {borders} are invalid"
     return borders
 
 
@@ -199,7 +200,9 @@ def to_tensor_sample(sample, tensor_type="torch.FloatTensor"):
     transform = transforms.ToTensor()
     for key in filter_dict(sample, ["rgb", "rgb_original", "depth", "input_depth"]):
         sample[key] = transform(sample[key]).type(tensor_type)
-    for key in filter_dict(sample, ["rgb_context", "rgb_context_original", "depth_context"]):
+    for key in filter_dict(
+        sample, ["rgb_context", "rgb_context_original", "depth_context"]
+    ):
         sample[key] = [transform(k).type(tensor_type) for k in sample[key]]
     return sample
 
@@ -427,7 +430,9 @@ def get_transforms(
         )
     if mode == "test":
         return partial(
-            test_transforms, crop_eval_borders=crop_eval_borders, image_shape=image_shape
+            test_transforms,
+            crop_eval_borders=crop_eval_borders,
+            image_shape=image_shape,
         )
     raise ValueError(f"Unknown mode {mode}")
 
@@ -473,20 +478,20 @@ def align_dataset(sample, scales, contexts):
 
     for scale in scales:
         scaled_K = resized_K.copy()
-        scaled_K[:, :2, :] /= 2**scale
+        scaled_K[:, :2, :] /= 2 ** scale
 
         sample[("K", scale)] = scaled_K.copy()
         sample[("inv_K", scale)] = np.linalg.pinv(scaled_K).copy()
 
         resized_org = F.interpolate(
             org_images,
-            size=(w // (2**scale), h // (2**scale)),
+            size=(w // (2 ** scale), h // (2 ** scale)),
             mode="bilinear",
             align_corners=False,
         )
         resized_aug = F.interpolate(
             aug_images,
-            size=(w // (2**scale), h // (2**scale)),
+            size=(w // (2 ** scale), h // (2 ** scale)),
             mode="bilinear",
             align_corners=False,
         )
@@ -586,7 +591,9 @@ class NuScenesdataset(Dataset):
             self.filenames = f.readlines()
 
     def _resolve_split_list_path(self, split):
-        tmp_dir = os.path.join(tempfile.gettempdir(), "drivingforward_gsplat", "nuscenes")
+        tmp_dir = os.path.join(
+            tempfile.gettempdir(), "drivingforward_gsplat", "nuscenes"
+        )
         tmp_path = os.path.join(tmp_dir, f"{split}.txt")
         if os.path.exists(tmp_path):
             return tmp_path
@@ -692,11 +699,13 @@ class NuScenesdataset(Dataset):
             else:
                 bwd_sample = self.dataset.get("sample_data", cam_sample["prev"])
 
-            world_to_ego_bwd = self.dataset.get("ego_pose", bwd_sample["ego_pose_token"])
+            world_to_ego_bwd = self.dataset.get(
+                "ego_pose", bwd_sample["ego_pose_token"]
+            )
             world_to_ego_bwd_rotation = Quaternion(world_to_ego_bwd["rotation"]).inverse
-            world_to_ego_bwd_translation = -np.array(
-                world_to_ego_bwd["translation"]
-            )[:, None]
+            world_to_ego_bwd_translation = -np.array(world_to_ego_bwd["translation"])[
+                :, None
+            ]
             world_to_ego_bwd = np.vstack(
                 [
                     np.hstack(
@@ -714,29 +723,38 @@ class NuScenesdataset(Dataset):
                 "calibrated_sensor", bwd_sample["calibrated_sensor_token"]
             )
             cam_to_ego_bwd_rotation = Quaternion(cam_to_ego_bwd["rotation"])
-            cam_to_ego_bwd_translation = np.array(cam_to_ego_bwd["translation"])[:, None]
+            cam_to_ego_bwd_translation = np.array(cam_to_ego_bwd["translation"])[
+                :, None
+            ]
             cam_to_ego_bwd = np.vstack(
                 [
                     np.hstack(
-                        (cam_to_ego_bwd_rotation.rotation_matrix, cam_to_ego_bwd_translation)
+                        (
+                            cam_to_ego_bwd_rotation.rotation_matrix,
+                            cam_to_ego_bwd_translation,
+                        )
                     ),
                     np.array([0, 0, 0, 1]),
                 ]
             )
             ego_to_cam_bwd = np.linalg.inv(cam_to_ego_bwd)
 
-            cam_T_cam_bwd = ego_to_cam_bwd @ world_to_ego_bwd @ ego_to_world @ cam_to_ego
+            cam_T_cam_bwd = (
+                ego_to_cam_bwd @ world_to_ego_bwd @ ego_to_world @ cam_to_ego
+            )
 
             cam_T_cam.append(cam_T_cam_bwd)
 
         if self.fwd != 0:
             fwd_sample = self.dataset.get("sample_data", cam_sample["next"])
 
-            world_to_ego_fwd = self.dataset.get("ego_pose", fwd_sample["ego_pose_token"])
+            world_to_ego_fwd = self.dataset.get(
+                "ego_pose", fwd_sample["ego_pose_token"]
+            )
             world_to_ego_fwd_rotation = Quaternion(world_to_ego_fwd["rotation"]).inverse
-            world_to_ego_fwd_translation = -np.array(
-                world_to_ego_fwd["translation"]
-            )[:, None]
+            world_to_ego_fwd_translation = -np.array(world_to_ego_fwd["translation"])[
+                :, None
+            ]
             world_to_ego_fwd = np.vstack(
                 [
                     np.hstack(
@@ -754,18 +772,25 @@ class NuScenesdataset(Dataset):
                 "calibrated_sensor", fwd_sample["calibrated_sensor_token"]
             )
             cam_to_ego_fwd_rotation = Quaternion(cam_to_ego_fwd["rotation"])
-            cam_to_ego_fwd_translation = np.array(cam_to_ego_fwd["translation"])[:, None]
+            cam_to_ego_fwd_translation = np.array(cam_to_ego_fwd["translation"])[
+                :, None
+            ]
             cam_to_ego_fwd = np.vstack(
                 [
                     np.hstack(
-                        (cam_to_ego_fwd_rotation.rotation_matrix, cam_to_ego_fwd_translation)
+                        (
+                            cam_to_ego_fwd_rotation.rotation_matrix,
+                            cam_to_ego_fwd_translation,
+                        )
                     ),
                     np.array([0, 0, 0, 1]),
                 ]
             )
             ego_to_cam_fwd = np.linalg.inv(cam_to_ego_fwd)
 
-            cam_T_cam_fwd = ego_to_cam_fwd @ world_to_ego_fwd @ ego_to_world @ cam_to_ego
+            cam_T_cam_fwd = (
+                ego_to_cam_fwd @ world_to_ego_fwd @ ego_to_world @ cam_to_ego
+            )
 
             cam_T_cam.append(cam_T_cam_fwd)
 
@@ -914,7 +939,9 @@ class NuScenesdataset(Dataset):
             }
 
             if self.with_depth:
-                data.update({"depth": self.generate_depth_map(sample_nusc, cam, cam_sample)})
+                data.update(
+                    {"depth": self.generate_depth_map(sample_nusc, cam, cam_sample)}
+                )
             if self.with_pose:
                 data.update({"extrinsics": self.get_current("extrinsics", cam_sample)})
             if self.with_ego_pose:
@@ -982,4 +1009,49 @@ def construct_dataset(cfg, mode, **kwargs):
     else:
         raise ValueError(f"Unknown dataset: {cfg['data']['dataset']}")
     return dataset
+
+
+class EnvNuScenesDataset(Dataset):
+    def __init__(
+        self,
+        split,
+        cameras=None,
+        back_context=0,
+        forward_context=0,
+        data_transform=None,
+        depth_type=None,
+        scale_range=2,
+        with_pose=None,
+        with_ego_pose=None,
+        with_mask=None,
+    ):
+        from dotenv import load_dotenv
+
+        load_dotenv(dotenv_path=os.path.join(os.getcwd(), ".env"), override=False)
+        data_root = os.getenv("NUSCENES_DATA_ROOT")
+        if not data_root:
+            raise ValueError(
+                "Missing NUSCENES_DATA_ROOT. Set it via .env to /mnt/sata_ssd/nuscenes_full/v1.0"
+            )
+        self._dataset = NuScenesdataset(
+            data_root,
+            split,
+            cameras=cameras,
+            back_context=back_context,
+            forward_context=forward_context,
+            data_transform=data_transform,
+            depth_type=depth_type,
+            scale_range=scale_range,
+            with_pose=with_pose,
+            with_ego_pose=with_ego_pose,
+            with_mask=with_mask,
+        )
+
+    def __len__(self):
+        return len(self._dataset)
+
+    def __getitem__(self, idx):
+        return self._dataset[idx]
+
+
 _PIL_INTERPOLATION = pil.Resampling.LANCZOS

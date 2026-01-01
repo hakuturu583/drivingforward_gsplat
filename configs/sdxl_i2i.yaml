@@ -1,0 +1,25 @@
+config_file: "configs/nuscenes/main.yaml"
+output_dir: "output"
+novel_view_mode: "MF"
+sample_index: 0
+height: null
+blend_width: 0
+model_id: "stabilityai/stable-diffusion-xl-base-1.0"
+ip_adapter_model_id: "h94/IP-Adapter"
+ip_adapter_subfolder: "sdxl_models"
+ip_adapter_weight_name: "ip-adapter_sdxl_vit-h.safetensors"
+ip_adapter_scale: 0.6
+control_nets:
+  - id: diffusers/controlnet-canny-sdxl-1.0
+    scale: 0.3
+  - id: diffusers/controlnet-depth-sdxl-1.0
+    scale: 0.4
+depth_model_id: "depth-anything/DA3METRIC-LARGE"
+depth_device: "cuda"
+strength: 0.4
+steps: 32
+guidance_scale: 9.0
+cpu_offload: false
+sequential_offload: false
+xformers: true
+seed: null

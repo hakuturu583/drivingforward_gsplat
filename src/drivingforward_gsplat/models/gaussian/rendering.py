@@ -201,7 +201,9 @@ def get_adj_cams(cam):
     return adj_cams
 
 
-def pts2render(inputs, outputs, cam_num, novel_cam, novel_frame_id, bg_color, mode="MF"):
+def pts2render(
+    inputs, outputs, cam_num, novel_cam, novel_frame_id, bg_color, mode="MF"
+):
     bs, _, height, width = inputs[("color", 0, 0)][:, novel_cam, ...].shape
     render_novel_list = []
     for i in range(bs):
