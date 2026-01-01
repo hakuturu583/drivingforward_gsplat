@@ -78,7 +78,9 @@ def _gather_gaussians(
     cam_num: int,
     mode: str,
     sample_idx: int,
-) -> Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
+) -> Optional[
+    Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+]:
     cams = range(cam_num) if mode == "MF" else range(cam_num)
     xyz_list = []
     rot_list = []
@@ -190,26 +192,30 @@ def save_gaussians_as_inria_ply(
     num = xyz_np.shape[0]
     d_sh = sh_np.shape[2]
     rest_dim = max(d_sh - 1, 0)
-    dtype_fields = [
-        ("x", "f4"),
-        ("y", "f4"),
-        ("z", "f4"),
-        ("nx", "f4"),
-        ("ny", "f4"),
-        ("nz", "f4"),
-        ("f_dc_0", "f4"),
-        ("f_dc_1", "f4"),
-        ("f_dc_2", "f4"),
-    ] + [(f"f_rest_{idx}", "f4") for idx in range(rest_dim * 3)] + [
-        ("opacity", "f4"),
-        ("scale_0", "f4"),
-        ("scale_1", "f4"),
-        ("scale_2", "f4"),
-        ("rot_0", "f4"),
-        ("rot_1", "f4"),
-        ("rot_2", "f4"),
-        ("rot_3", "f4"),
-    ]
+    dtype_fields = (
+        [
+            ("x", "f4"),
+            ("y", "f4"),
+            ("z", "f4"),
+            ("nx", "f4"),
+            ("ny", "f4"),
+            ("nz", "f4"),
+            ("f_dc_0", "f4"),
+            ("f_dc_1", "f4"),
+            ("f_dc_2", "f4"),
+        ]
+        + [(f"f_rest_{idx}", "f4") for idx in range(rest_dim * 3)]
+        + [
+            ("opacity", "f4"),
+            ("scale_0", "f4"),
+            ("scale_1", "f4"),
+            ("scale_2", "f4"),
+            ("rot_0", "f4"),
+            ("rot_1", "f4"),
+            ("rot_2", "f4"),
+            ("rot_3", "f4"),
+        ]
+    )
 
     data = np.zeros(num, dtype=dtype_fields)
     data["x"] = xyz_np[:, 0]

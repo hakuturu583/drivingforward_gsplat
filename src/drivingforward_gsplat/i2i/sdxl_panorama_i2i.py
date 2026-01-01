@@ -63,9 +63,7 @@ def _split_strip_by_widths(
     return segments
 
 
-def _output_path_from_nuscenes_filename(
-    output_dir: str, nuscenes_filename: str
-) -> str:
+def _output_path_from_nuscenes_filename(output_dir: str, nuscenes_filename: str) -> str:
     rel_path = (
         os.path.relpath(nuscenes_filename, "samples")
         if nuscenes_filename.startswith("samples/")
@@ -124,7 +122,9 @@ class SdxlPanoramaI2I:
             if ip_adapter_weight_name:
                 ip_adapter_kwargs["weight_name"] = ip_adapter_weight_name
             if ip_adapter_image_encoder_folder is not None:
-                ip_adapter_kwargs["image_encoder_folder"] = ip_adapter_image_encoder_folder
+                ip_adapter_kwargs[
+                    "image_encoder_folder"
+                ] = ip_adapter_image_encoder_folder
             self.pipe.load_ip_adapter(ip_adapter_model_id, **ip_adapter_kwargs)
             self.pipe.set_ip_adapter_scale(ip_adapter_scale)
 
@@ -372,9 +372,7 @@ def main():
     blended_segments = sdxl_panorama_i2i(i2i_cfg, images)
     os.makedirs(i2i_cfg.output_dir, exist_ok=True)
     for cam_filename, segment in zip(cam_filenames, blended_segments):
-        out_path = _output_path_from_nuscenes_filename(
-            i2i_cfg.output_dir, cam_filename
-        )
+        out_path = _output_path_from_nuscenes_filename(i2i_cfg.output_dir, cam_filename)
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         segment.save(out_path)
 

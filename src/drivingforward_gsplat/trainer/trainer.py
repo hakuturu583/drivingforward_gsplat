@@ -26,6 +26,7 @@ from drivingforward_gsplat.utils.gaussian_ply import (
     save_gaussians_as_inria_ply,
     save_gaussians_as_ply,
 )
+
 FloatImage = Union[
     Float[Tensor, "height width"],
     Float[Tensor, "channel height width"],
@@ -187,9 +188,7 @@ class DrivingForwardTrainer:
                 if tokens is None:
                     tokens = [
                         f"batch{batch_idx}_idx{idx}"
-                        for idx in range(
-                            outputs[("cam", 0)][("xyz", 0, 0)].shape[0]
-                        )
+                        for idx in range(outputs[("cam", 0)][("xyz", 0, 0)].shape[0])
                     ]
                 for sample_idx, token in enumerate(tokens):
                     token_safe = str(token).replace("/", "_").replace(os.sep, "_")

@@ -43,9 +43,7 @@ def build_control_images(
             controls.append(control_image_from_canny(image_strip))
         elif "depth" in controlnet_id.lower():
             if depths is None:
-                depths = dense_depth_from_anything(
-                    images, depth_device, depth_model_id
-                )
+                depths = dense_depth_from_anything(images, depth_device, depth_model_id)
             control_strip = _concat_strip(
                 [to_pil_depth(d) for d in depths],
                 height or image_strip.height,
