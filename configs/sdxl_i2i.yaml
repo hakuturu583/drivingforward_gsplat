@@ -12,8 +12,6 @@ strength: 0.6
 steps: 30
 guidance_scale: 5.0
 controlnet_scale: 1.0
-tile_size: null
-tile_overlap: 64
 cpu_offload: false
 sequential_offload: false
 xformers: false

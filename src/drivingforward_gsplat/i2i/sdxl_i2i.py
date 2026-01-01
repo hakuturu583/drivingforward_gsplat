@@ -180,8 +180,6 @@ class SdxlStripPanoramaI2I:
         num_inference_steps: int = 30,
         guidance_scale: float = 5.0,
         controlnet_conditioning_scale: float = 1.0,
-        tile_size: Optional[int] = None,
-        tile_overlap: int = 64,
         seed: Optional[int] = None,
     ) -> Image.Image:
         image_strip, target_size = self.build_strip_panorama(
@@ -190,23 +188,6 @@ class SdxlStripPanoramaI2I:
         depth_strip = self.build_depth_panorama(
             depths, height=height or image_strip.height
         )
-
-        if tile_size:
-            result = self._generate_tiled(
-                prompt=prompt,
-                image_strip=image_strip,
-                depth_strip=depth_strip,
-                strength=strength,
-                tile_size=tile_size,
-                tile_overlap=tile_overlap,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
-                controlnet_conditioning_scale=controlnet_conditioning_scale,
-                seed=seed,
-            )
-            if height is not None and result.size != target_size:
-                result = result.resize(target_size, resample=Image.BICUBIC)
-            return result
 
         generator = None
         if seed is not None:
@@ -228,74 +209,6 @@ class SdxlStripPanoramaI2I:
         if height is not None and output.size != target_size:
             output = output.resize(target_size, resample=Image.BICUBIC)
         return output
-
-    def _generate_tiled(
-        self,
-        prompt: str,
-        image_strip: Image.Image,
-        depth_strip: Image.Image,
-        strength: float,
-        tile_size: int,
-        tile_overlap: int,
-        num_inference_steps: int,
-        guidance_scale: float,
-        controlnet_conditioning_scale: float,
-        seed: Optional[int],
-    ) -> Image.Image:
-        width, height = depth_strip.size
-        tile_size = min(tile_size, width, height)
-        stride = max(1, tile_size - tile_overlap)
-
-        output_accum = np.zeros((height, width, 3), dtype=np.float32)
-        weight_accum = np.zeros((height, width, 1), dtype=np.float32)
-
-        win_x = np.hanning(tile_size) if tile_overlap > 0 else np.ones(tile_size)
-        win_y = np.hanning(tile_size) if tile_overlap > 0 else np.ones(tile_size)
-        weight = (win_y[:, None] * win_x[None, :]).astype(np.float32)
-        weight = np.expand_dims(weight, axis=-1)
-
-        tiles = []
-        for y in range(0, height, stride):
-            y0 = min(y, height - tile_size)
-            for x in range(0, width, stride):
-                x0 = min(x, width - tile_size)
-                tiles.append((x0, y0))
-            if y0 == height - tile_size:
-                break
-
-        for idx, (x0, y0) in enumerate(tiles):
-            x1 = x0 + tile_size
-            y1 = y0 + tile_size
-            image_tile = image_strip.crop((x0, y0, x1, y1))
-            depth_tile = depth_strip.crop((x0, y0, x1, y1))
-
-            generator = None
-            if seed is not None:
-                generator = torch.Generator(device=self.device).manual_seed(seed + idx)
-
-            if self.device == "cuda":
-                torch.cuda.empty_cache()
-            result = self.pipe(
-                prompt=prompt,
-                image=image_tile,
-                control_image=depth_tile,
-                strength=strength,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
-                controlnet_conditioning_scale=controlnet_conditioning_scale,
-                generator=generator,
-                height=tile_size,
-                width=tile_size,
-            )
-            tile_img = result.images[0]
-            tile_arr = np.array(tile_img, dtype=np.float32)
-
-            output_accum[y0:y1, x0:x1] += tile_arr * weight
-            weight_accum[y0:y1, x0:x1] += weight
-
-        output = output_accum / np.maximum(weight_accum, 1e-6)
-        output = np.clip(output, 0, 255).astype(np.uint8)
-        return Image.fromarray(output)
 
 
 def _build_env_dataset(cfg, mode: str):
@@ -568,8 +481,6 @@ def main():
         num_inference_steps=i2i_cfg.steps,
         guidance_scale=i2i_cfg.guidance_scale,
         controlnet_conditioning_scale=i2i_cfg.controlnet_scale,
-        tile_size=i2i_cfg.tile_size,
-        tile_overlap=i2i_cfg.tile_overlap,
         seed=i2i_cfg.seed,
     )
     result.save(os.path.join(i2i_cfg.output_dir, "output_image.png"))

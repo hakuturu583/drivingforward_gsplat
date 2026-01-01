@@ -20,8 +20,6 @@ class SdxlI2IConfig:
     steps: int = 30
     guidance_scale: float = 5.0
     controlnet_scale: float = 1.0
-    tile_size: Optional[int] = None
-    tile_overlap: int = 64
     cpu_offload: bool = False
     sequential_offload: bool = False
     xformers: bool = False

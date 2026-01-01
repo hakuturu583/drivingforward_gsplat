@@ -15,3 +15,5 @@ uv run drivingforward-gsplat
 uv run python -m drivingforward_gsplat.i2i.sdxl_i2i \
   --config configs/sdxl_i2i.yaml
 ```
+
+Edit `configs/sdxl_i2i.yaml` to change prompts, offload, or model ids.
