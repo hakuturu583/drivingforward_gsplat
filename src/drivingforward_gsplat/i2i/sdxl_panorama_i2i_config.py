@@ -3,11 +3,7 @@ from typing import List, Optional
 
 import yaml
 
-
-@dataclass
-class ControlNetConfig:
-    id: str
-    scale: float = 1.0
+from drivingforward_gsplat.i2i.controlnet import ControlNetConfig
 
 
 @dataclass
