@@ -22,7 +22,10 @@ import numpy as np
 
 from tqdm import tqdm
 
-from drivingforward_gsplat.utils.gaussian_ply import save_gaussians_as_ply
+from drivingforward_gsplat.utils.gaussian_ply import (
+    save_gaussians_as_inria_ply,
+    save_gaussians_as_ply,
+)
 FloatImage = Union[
     Float[Tensor, "height width"],
     Float[Tensor, "channel height width"],
@@ -196,6 +199,16 @@ class DrivingForwardTrainer:
                     save_gaussians_as_ply(
                         outputs,
                         output_path,
+                        model.num_cams,
+                        model.novel_view_mode,
+                        sample_idx=sample_idx,
+                    )
+                    output_inria_path = os.path.join(
+                        self.log_dir, "gaussians", token_safe, "output_inria.ply"
+                    )
+                    save_gaussians_as_inria_ply(
+                        outputs,
+                        output_inria_path,
                         model.num_cams,
                         model.novel_view_mode,
                         sample_idx=sample_idx,
