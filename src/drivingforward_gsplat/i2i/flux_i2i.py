@@ -7,7 +7,6 @@ import numpy as np
 import torch
 from PIL import Image
 
-from diffusers import FluxControlNetModel, FluxControlNetPipeline
 from dotenv import load_dotenv
 
 from drivingforward_gsplat.dataset import NuScenesdataset, get_transforms
@@ -180,11 +179,17 @@ class FluxStripPanoramaI2I:
         torch_dtype: torch.dtype = torch.bfloat16,
         enable_cpu_offload: bool = True,
         enable_sequential_offload: bool = False,
+        attn_backend: Optional[str] = None,
     ) -> None:
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
         self.torch_dtype = torch_dtype
+
+        if attn_backend:
+            os.environ["DIFFUSERS_ATTN_BACKEND"] = attn_backend
+
+        from diffusers import FluxControlNetModel, FluxControlNetPipeline
 
         _patch_diffusers_enable_gqa()
         controlnet = FluxControlNetModel.from_pretrained(
@@ -461,6 +466,11 @@ def _parse_args():
     parser.add_argument("--tile_overlap", type=int, default=64)
     parser.add_argument("--cpu_offload", action="store_true")
     parser.add_argument("--sequential_offload", action="store_true")
+    parser.add_argument(
+        "--attn_backend",
+        default=None,
+        help="Diffusers attention backend override (e.g. flash, xformers, native).",
+    )
     parser.add_argument("--seed", type=int, default=None)
     return parser.parse_args()
 
@@ -498,6 +508,7 @@ def main():
         controlnet_id=args.controlnet_id,
         enable_cpu_offload=args.cpu_offload,
         enable_sequential_offload=args.sequential_offload,
+        attn_backend=args.attn_backend,
     )
     result = i2i.generate(
         prompt=args.prompt,

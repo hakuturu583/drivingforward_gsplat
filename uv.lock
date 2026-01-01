@@ -264,6 +264,7 @@ dependencies = [
     { name = "dotenv" },
     { name = "e3nn" },
     { name = "einops" },
+    { name = "flash-attn", marker = "sys_platform == 'linux'" },
     { name = "gsplat" },
     { name = "hf" },
     { name = "huggingface-hub" },
@@ -289,6 +290,7 @@ requires-dist = [
     { name = "dotenv", specifier = ">=0.9.9" },
     { name = "e3nn", specifier = ">=0.5.9" },
     { name = "einops", specifier = ">=0.8.1" },
+    { name = "flash-attn", marker = "sys_platform == 'linux'", specifier = "==2.7.4.post1" },
     { name = "gsplat", specifier = "==1.5.3" },
     { name = "hf", specifier = ">=1.2.3" },
     { name = "huggingface-hub", specifier = ">=1.2.3" },
@@ -352,6 +354,16 @@ sdist = { url = "https://files.pythonhosted.org/packages/c0/00/f8d10588d2019d6d6
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e5/4c/93d0f85318da65923e4b91c1c2ff03d8a458cbefebe3bc612a6693c7906d/fire-0.7.1-py3-none-any.whl", hash = "sha256:e43fd8a5033a9001e7e2973bab96070694b9f12f2e0ecf96d4683971b5ab1882", size = 115945, upload-time = "2025-08-16T20:20:22.87Z" },
 ]
+
+[[package]]
+name = "flash-attn"
+version = "2.7.4.post1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "einops", marker = "sys_platform == 'linux'" },
+    { name = "torch", version = "2.4.0+cu124", source = { registry = "https://download.pytorch.org/whl/cu124" }, marker = "sys_platform == 'linux'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/11/34/9bf60e736ed7bbe15055ac2dab48ec67d9dbd088d2b4ae318fd77190ab4e/flash_attn-2.7.4.post1.tar.gz", hash = "sha256:f03485c9a49a4d68d0733acdcad80ab0e72afa025a777fdc2966ceccf9d51765", size = 5986610, upload-time = "2025-01-30T06:39:51.93Z" }
 
 [[package]]
 name = "fonttools"
