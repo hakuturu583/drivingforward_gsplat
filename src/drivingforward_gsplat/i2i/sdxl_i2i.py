@@ -7,6 +7,7 @@ from typing import List, Optional, Sequence, Union
 import numpy as np
 import torch
 from PIL import Image
+from skimage import feature
 
 from depth_anything_3.api import DepthAnything3
 from diffusers import ControlNetModel, StableDiffusionXLControlNetImg2ImgPipeline
@@ -183,13 +184,17 @@ class SdxlStripPanoramaI2I:
         guidance_scale: float = 5.0,
         controlnet_conditioning_scale: float = 1.0,
         seed: Optional[int] = None,
+        control_image: Optional[Image.Image] = None,
     ) -> Image.Image:
         image_strip, target_size = self.build_strip_panorama(
             images, height=height, return_target_size=True
         )
-        depth_strip = self.build_depth_panorama(
-            depths, height=height or image_strip.height
-        )
+        if control_image is None:
+            control_strip = self.build_depth_panorama(
+                depths, height=height or image_strip.height
+            )
+        else:
+            control_strip = control_image
 
         generator = None
         if seed is not None:
@@ -198,14 +203,14 @@ class SdxlStripPanoramaI2I:
         result = self.pipe(
             prompt=prompt,
             image=image_strip,
-            control_image=depth_strip,
+            control_image=control_strip,
             strength=strength,
             num_inference_steps=num_inference_steps,
             guidance_scale=guidance_scale,
             controlnet_conditioning_scale=controlnet_conditioning_scale,
             generator=generator,
-            height=depth_strip.height,
-            width=depth_strip.width,
+            height=control_strip.height,
+            width=control_strip.width,
         )
         output = result.images[0]
         if height is not None and output.size != target_size:
@@ -284,6 +289,36 @@ def _dense_depth_from_anything(
     return [depth for depth in prediction.depth]
 
 
+def _control_image_from_canny(image_strip: Image.Image) -> Image.Image:
+    gray = np.array(image_strip.convert("L"), dtype=np.float32) / 255.0
+    edges = feature.canny(gray, sigma=2.0)
+    edge_img = (edges.astype(np.uint8) * 255)
+    return Image.fromarray(edge_img, mode="L").convert("RGB")
+
+
+def _build_control_image(
+    images: Sequence[ImageLike],
+    controlnet_id: str,
+    depth_device: torch.device,
+    depth_model_id: str,
+    height: Optional[int],
+):
+    pil_images = [_to_pil_rgb(img) for img in images]
+    target_width = sum(img.width for img in pil_images)
+    target_height = pil_images[0].height
+    image_strip = _concat_strip(pil_images, height)
+    target_size = (target_width, target_height)
+    if "canny" in controlnet_id.lower():
+        control_strip = _control_image_from_canny(image_strip)
+        return image_strip, control_strip, target_size
+
+    depths = _dense_depth_from_anything(images, depth_device, depth_model_id)
+    control_strip = _concat_strip(
+        [_to_pil_depth(d) for d in depths], height or image_strip.height
+    ).convert("RGB")
+    return image_strip, control_strip, target_size
+
+
 def _parse_args():
     parser = argparse.ArgumentParser(description="SDXL strip panorama i2i")
     parser.add_argument("--config", required=True, help="Path to SDXL i2i yaml config.")
@@ -318,8 +353,12 @@ def main():
     images_tensor = sample[("color", 0, 0)]
     images = [images_tensor[i] for i in range(images_tensor.shape[0])]
     depth_device = torch.device(i2i_cfg.depth_device)
-    depths = _dense_depth_from_anything(
-        images, depth_device, i2i_cfg.depth_model_id
+    image_strip, control_strip, _ = _build_control_image(
+        images,
+        i2i_cfg.controlnet_id,
+        depth_device,
+        i2i_cfg.depth_model_id,
+        i2i_cfg.height,
     )
 
     i2i = SdxlStripPanoramaI2I(
@@ -330,25 +369,20 @@ def main():
         enable_xformers=i2i_cfg.xformers,
     )
     os.makedirs(i2i_cfg.output_dir, exist_ok=True)
-    input_strip, _ = i2i.build_strip_panorama(
-        images, height=i2i_cfg.height, return_target_size=True
-    )
-    depth_strip = i2i.build_depth_panorama(
-        depths, height=i2i_cfg.height or input_strip.height
-    )
-    input_strip.save(os.path.join(i2i_cfg.output_dir, "input_image.png"))
-    depth_strip.save(os.path.join(i2i_cfg.output_dir, "depth_map.png"))
+    image_strip.save(os.path.join(i2i_cfg.output_dir, "input_image.png"))
+    control_strip.save(os.path.join(i2i_cfg.output_dir, "control_map.png"))
 
     result = i2i.generate(
         prompt=i2i_cfg.prompt,
         images=images,
-        depths=depths,
+        depths=[],
         height=i2i_cfg.height,
         strength=i2i_cfg.strength,
         num_inference_steps=i2i_cfg.steps,
         guidance_scale=i2i_cfg.guidance_scale,
         controlnet_conditioning_scale=i2i_cfg.controlnet_scale,
         seed=i2i_cfg.seed,
+        control_image=control_strip,
     )
     result.save(os.path.join(i2i_cfg.output_dir, "output_image.png"))
 

@@ -16,4 +16,4 @@ uv run python -m drivingforward_gsplat.i2i.sdxl_i2i \
   --config configs/sdxl_i2i.yaml
 ```
 
-Edit `configs/sdxl_i2i.yaml` to change prompts, offload, or model ids (including `depth_model_id`).
+Edit `configs/sdxl_i2i.yaml` to change prompts, offload, or model ids. Set `controlnet_id` to `diffusers/controlnet-canny-sdxl-1.0` to use Canny edges (depth model is ignored). Outputs are saved as `input_image.png`, `control_map.png`, and `output_image.png` in `output_dir`.
