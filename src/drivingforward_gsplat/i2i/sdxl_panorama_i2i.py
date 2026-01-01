@@ -18,10 +18,10 @@ from drivingforward_gsplat.utils import misc as utils
 from drivingforward_gsplat.i2i.prompt_config import PromptConfig
 from drivingforward_gsplat.i2i.sdxl_panorama_i2i_config import SdxlPanoramaI2IConfig
 from drivingforward_gsplat.depth.depth import to_pil_depth
+from drivingforward_gsplat.utils.misc import to_pil_rgb
 from drivingforward_gsplat.panorama.panorama import (
     ImageLike,
     _concat_strip,
-    _to_pil_rgb,
     build_depth_panorama,
     build_strip_panorama,
 )
@@ -243,7 +243,7 @@ def _dense_depth_from_anything(
     tmp_dir = tempfile.mkdtemp(prefix="da3_depth_")
     image_paths = []
     for idx, image in enumerate(images):
-        pil = _to_pil_rgb(image)
+        pil = to_pil_rgb(image)
         path = os.path.join(tmp_dir, f"{idx:02d}.png")
         pil.save(path)
         image_paths.append(path)
@@ -265,7 +265,7 @@ def _build_control_images(
     depth_model_id: str,
     height: Optional[int],
 ):
-    pil_images = [_to_pil_rgb(img) for img in images]
+    pil_images = [to_pil_rgb(img) for img in images]
     target_width = sum(img.width for img in pil_images)
     target_height = pil_images[0].height
     image_strip = _concat_strip(pil_images, height)
@@ -373,11 +373,11 @@ def sdxl_panorama_i2i(
     )
     blended = _blend_strip_segments(
         result,
-        widths=[img.width for img in [_to_pil_rgb(img) for img in images]],
+        widths=[img.width for img in [to_pil_rgb(img) for img in images]],
         blend_width=i2i_cfg.blend_width,
     )
     blended_segments = _split_strip_by_widths(
-        blended, widths=[img.width for img in [_to_pil_rgb(img) for img in images]]
+        blended, widths=[img.width for img in [to_pil_rgb(img) for img in images]]
     )
     return blended_segments
 
