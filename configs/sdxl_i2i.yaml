@@ -11,9 +11,9 @@ controlnet_id: diffusers/controlnet-canny-sdxl-1.0
 depth_model_id: "depth-anything/DA3METRIC-LARGE"
 depth_device: "cuda"
 strength: 0.6
-steps: 30
+steps: 50
 guidance_scale: 5.0
-controlnet_scale: 1.0
+controlnet_scale: 0.5
 cpu_offload: false
 sequential_offload: false
 xformers: false
