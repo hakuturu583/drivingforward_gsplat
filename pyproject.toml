@@ -31,6 +31,7 @@ dependencies = [
     "flash-attn==v2.7.4.post1; sys_platform == 'linux'",
     "transformers>=4.38.0",
     "xformers>=0.0.27.post2",
+    "depth-anything-3",
 ]
 
 [project.scripts]
@@ -53,6 +54,7 @@ torch = [
 torchvision = [
   { index = "pytorch-cu124", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
+depth-anything-3 = { git = "https://github.com/ByteDance-Seed/Depth-Anything-3.git" }
 
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true }]

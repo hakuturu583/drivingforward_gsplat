@@ -1,12 +1,14 @@
 import argparse
 import math
 import os
+import tempfile
 from typing import List, Optional, Sequence, Union
 
 import numpy as np
 import torch
 from PIL import Image
 
+from depth_anything_3.api import DepthAnything3
 from diffusers import ControlNetModel, StableDiffusionXLControlNetImg2ImgPipeline
 from huggingface_hub import snapshot_download
 
@@ -265,152 +267,21 @@ def _build_env_dataset(cfg, mode: str):
     return EnvNuScenesDataset(split, **dataset_args)
 
 
-def _ensure_torchscript_modules(torchscript_dir):
-    required = (
-        "depth_encoder_MF.pt",
-        "depth_encoder_SF.pt",
-        "depth_decoder_MF.pt",
-        "depth_decoder_SF.pt",
-    )
-    missing = [
-        name
-        for name in required
-        if not os.path.isfile(os.path.join(torchscript_dir, name))
-    ]
-    if not missing:
-        return
-    os.makedirs(torchscript_dir, exist_ok=True)
-    snapshot_download(
-        repo_id="hakuturu583/DrivingForward",
-        local_dir=torchscript_dir,
-        local_dir_use_symlinks=False,
-        allow_patterns=list(required),
-    )
-
-
-class TorchScriptDepthNet(torch.nn.Module):
-    def __init__(self, cfg, torchscript_dir, mode, device):
-        super().__init__()
-        self.num_cams = cfg["data"]["num_cams"]
-        self.fusion_level = cfg["model"]["fusion_level"]
-        self.mode = mode
-        enc_path = os.path.join(torchscript_dir, f"depth_encoder_{mode}.pt")
-        dec_path = os.path.join(torchscript_dir, f"depth_decoder_{mode}.pt")
-        self.depth_encoder = torch.jit.load(enc_path, map_location=device).eval()
-        self.depth_decoder = torch.jit.load(dec_path, map_location=device).eval()
-
-    def _run_one(self, images, mask, k, inv_k, extrinsics, extrinsics_inv):
-        feat0, feat1, proj_feat, img_feat0, img_feat1, img_feat2 = (
-            self.depth_encoder(images, mask, k, inv_k, extrinsics, extrinsics_inv)
-        )
-        disp = self.depth_decoder(feat0, feat1, proj_feat)
-        img_feat = (img_feat0, img_feat1, img_feat2)
-        return disp, img_feat
-
-    def forward(self, inputs):
-        outputs = {}
-        for cam in range(self.num_cams):
-            outputs[("cam", cam)] = {}
-
-        images = inputs[("color_aug", 0, 0)]
-        mask = inputs["mask"]
-        k = inputs[("K", self.fusion_level + 1)]
-        inv_k = inputs[("inv_K", self.fusion_level + 1)]
-        extrinsics = inputs["extrinsics"]
-        extrinsics_inv = inputs["extrinsics_inv"]
-
-        if self.mode == "MF":
-            images_last = inputs[("color_aug", -1, 0)]
-            images_next = inputs[("color_aug", 1, 0)]
-            enc_out = self.depth_encoder(
-                images,
-                images_last,
-                images_next,
-                mask,
-                k,
-                inv_k,
-                extrinsics,
-                extrinsics_inv,
-            )
-            feat0, feat1, proj_feat, img_feat0, img_feat1, img_feat2 = enc_out[:6]
-            feat0_last, feat1_last, proj_feat_last, img_feat0_last, img_feat1_last, img_feat2_last = enc_out[6:12]
-            feat0_next, feat1_next, proj_feat_next, img_feat0_next, img_feat1_next, img_feat2_next = enc_out[12:18]
-            disp_cur = self.depth_decoder(feat0, feat1, proj_feat)
-            disp_last = self.depth_decoder(feat0_last, feat1_last, proj_feat_last)
-            disp_next = self.depth_decoder(feat0_next, feat1_next, proj_feat_next)
-            img_feat_cur = (img_feat0, img_feat1, img_feat2)
-            img_feat_last = (img_feat0_last, img_feat1_last, img_feat2_last)
-            img_feat_next = (img_feat0_next, img_feat1_next, img_feat2_next)
-        else:
-            disp_cur, img_feat_cur = self._run_one(
-                images, mask, k, inv_k, extrinsics, extrinsics_inv
-            )
-
-        for cam in range(self.num_cams):
-            outputs[("cam", cam)][("disp", 0)] = disp_cur[:, cam, ...]
-            outputs[("cam", cam)][("img_feat", 0, 0)] = [
-                feat[:, cam, ...] for feat in img_feat_cur
-            ]
-            if self.mode == "MF":
-                outputs[("cam", cam)][("disp", -1, 0)] = disp_last[:, cam, ...]
-                outputs[("cam", cam)][("disp", 1, 0)] = disp_next[:, cam, ...]
-                outputs[("cam", cam)][("img_feat", -1, 0)] = [
-                    feat[:, cam, ...] for feat in img_feat_last
-                ]
-                outputs[("cam", cam)][("img_feat", 1, 0)] = [
-                    feat[:, cam, ...] for feat in img_feat_next
-                ]
-
-        return outputs
-
-
-def _disp_to_depth(disp_in, k_in, cfg):
-    min_disp = 1 / cfg["training"]["max_depth"]
-    max_disp = 1 / cfg["training"]["min_depth"]
-    disp_range = max_disp - min_disp
-    height = int(cfg["training"]["height"])
-    width = int(cfg["training"]["width"])
-    disp_in = torch.nn.functional.interpolate(
-        disp_in, [height, width], mode="bilinear", align_corners=False
-    )
-    disp = min_disp + disp_range * disp_in
-    depth = 1 / disp
-    return depth * k_in[:, 0:1, 0:1].unsqueeze(2) / cfg["training"]["focal_length_scale"]
-
-
-def _batchify_inputs(sample):
-    inputs = {}
-    for key, value in sample.items():
-        if torch.is_tensor(value):
-            inputs[key] = value.unsqueeze(0)
-        elif isinstance(value, np.ndarray):
-            inputs[key] = torch.from_numpy(value).float().unsqueeze(0)
-        else:
-            inputs[key] = value
-    return inputs
-
-
-def _dense_depth_from_network(sample, cfg, torchscript_dir, device):
-    inputs = _batchify_inputs(sample)
-    if "extrinsics" in inputs:
-        inputs["extrinsics_inv"] = torch.inverse(inputs["extrinsics"])
-    for key, value in list(inputs.items()):
-        if torch.is_tensor(value):
-            inputs[key] = value.to(device)
-
-    depth_net = TorchScriptDepthNet(
-        cfg, torchscript_dir, cfg["model"]["novel_view_mode"], device
-    )
-    with torch.no_grad():
-        depth_outputs = depth_net(inputs)
-
-    depth_maps = []
-    for cam in range(cfg["data"]["num_cams"]):
-        disp = depth_outputs[("cam", cam)][("disp", 0)]
-        k_in = inputs[("K", 0)][:, cam, ...]
-        depth = _disp_to_depth(disp, k_in, cfg)
-        depth_maps.append(depth[0, 0])
-    return depth_maps
+def _dense_depth_from_anything(
+    images: Sequence[ImageLike],
+    device: torch.device,
+    model_id: str,
+) -> List[np.ndarray]:
+    model = DepthAnything3.from_pretrained(model_id).to(device=device)
+    tmp_dir = tempfile.mkdtemp(prefix="da3_depth_")
+    image_paths = []
+    for idx, image in enumerate(images):
+        pil = _to_pil_rgb(image)
+        path = os.path.join(tmp_dir, f"{idx:02d}.png")
+        pil.save(path)
+        image_paths.append(path)
+    prediction = model.inference(image_paths)
+    return [depth for depth in prediction.depth]
 
 
 def _parse_args():
@@ -446,14 +317,10 @@ def main():
     sample = dataset[i2i_cfg.sample_index]
     images_tensor = sample[("color", 0, 0)]
     images = [images_tensor[i] for i in range(images_tensor.shape[0])]
-    torchscript_dir = (
-        i2i_cfg.torchscript_dir
-        if os.path.isabs(i2i_cfg.torchscript_dir)
-        else os.path.join(repo_root, i2i_cfg.torchscript_dir)
-    )
-    _ensure_torchscript_modules(torchscript_dir)
     depth_device = torch.device(i2i_cfg.depth_device)
-    depths = _dense_depth_from_network(sample, cfg, torchscript_dir, depth_device)
+    depths = _dense_depth_from_anything(
+        images, depth_device, i2i_cfg.depth_model_id
+    )
 
     i2i = SdxlStripPanoramaI2I(
         model_id=i2i_cfg.model_id,

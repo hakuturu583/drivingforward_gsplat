@@ -6,7 +6,7 @@ sample_index: 0
 height: null
 model_id: "stabilityai/stable-diffusion-xl-base-1.0"
 controlnet_id: "diffusers/controlnet-depth-sdxl-1.0"
-torchscript_dir: "torchscript"
+depth_model_id: "depth-anything/DA3METRIC-LARGE"
 depth_device: "cuda"
 strength: 0.6
 steps: 30

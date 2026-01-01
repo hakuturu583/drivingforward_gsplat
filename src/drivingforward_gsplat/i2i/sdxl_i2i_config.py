@@ -14,7 +14,7 @@ class SdxlI2IConfig:
     height: Optional[int] = None
     model_id: str = "stabilityai/stable-diffusion-xl-base-1.0"
     controlnet_id: str = "diffusers/controlnet-depth-sdxl-1.0"
-    torchscript_dir: str = "torchscript"
+    depth_model_id: str = "depth-anything/DA3METRIC-LARGE"
     depth_device: str = "cuda"
     strength: float = 0.6
     steps: int = 30
