@@ -21,6 +21,16 @@ from drivingforward_gsplat.i2i.sdxl_i2i_config import SdxlI2IConfig
 
 ImageLike = Union[Image.Image, np.ndarray, torch.Tensor]
 
+def _find_project_root(start_dir: str) -> str:
+    current = os.path.abspath(start_dir)
+    while True:
+        if os.path.isfile(os.path.join(current, "pyproject.toml")):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            raise FileNotFoundError("pyproject.toml not found in parent directories.")
+        current = parent
+
 
 def _tensor_to_numpy_uint8(tensor: torch.Tensor) -> np.ndarray:
     arr = tensor.detach().cpu()
@@ -398,6 +408,7 @@ def _parse_args():
 def main():
     args = _parse_args()
     repo_root = os.getcwd()
+    project_root = _find_project_root(repo_root)
     cfg_path = (
         args.config
         if os.path.isabs(args.config)
@@ -464,7 +475,7 @@ def main():
         abs_path = (
             ref_path
             if os.path.isabs(ref_path)
-            else os.path.join(repo_root, ref_path)
+            else os.path.join(project_root, ref_path)
         )
         reference_images.append(Image.open(abs_path).convert("RGB"))
 
