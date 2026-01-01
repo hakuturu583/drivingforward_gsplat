@@ -469,6 +469,8 @@ def _batchify_inputs(sample):
     for key, value in sample.items():
         if torch.is_tensor(value):
             inputs[key] = value.unsqueeze(0)
+        elif isinstance(value, np.ndarray):
+            inputs[key] = torch.from_numpy(value).float().unsqueeze(0)
         else:
             inputs[key] = value
     return inputs
