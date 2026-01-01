@@ -209,6 +209,7 @@ class SdxlStripPanoramaI2I:
     def generate(
         self,
         prompt: str,
+        negative_prompt: Optional[str],
         images: Sequence[ImageLike],
         depths: Sequence[ImageLike],
         height: Optional[int] = None,
@@ -239,6 +240,7 @@ class SdxlStripPanoramaI2I:
 
         result = self.pipe(
             prompt=prompt,
+            negative_prompt=negative_prompt,
             image=image_strip,
             control_image=control_strip,
             strength=strength,
@@ -436,6 +438,7 @@ def main():
 
     result = i2i.generate(
         prompt=i2i_cfg.prompt,
+        negative_prompt=i2i_cfg.negative_prompt,
         images=images,
         depths=[],
         height=i2i_cfg.height,
