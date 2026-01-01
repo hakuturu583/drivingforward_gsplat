@@ -1,10 +1,15 @@
 import math
+import os
+import tempfile
 from typing import List, Sequence, Union
 
 import numpy as np
 import torch
 from PIL import Image
 
+from depth_anything_3.api import DepthAnything3
+
+from drivingforward_gsplat.utils.misc import to_pil_rgb
 
 ImageLike = Union[Image.Image, np.ndarray, torch.Tensor]
 
@@ -51,3 +56,20 @@ def normalize_depths(depths: Sequence[ImageLike]) -> List[Image.Image]:
         norm = np.zeros_like(stacked, dtype=np.float32)
     norm = (norm * 255.0).clip(0, 255).astype(np.uint8)
     return [Image.fromarray(frame, mode="L") for frame in norm]
+
+
+def dense_depth_from_anything(
+    images: Sequence[ImageLike],
+    device: torch.device,
+    model_id: str,
+) -> List[np.ndarray]:
+    model = DepthAnything3.from_pretrained(model_id).to(device=device)
+    tmp_dir = tempfile.mkdtemp(prefix="da3_depth_")
+    image_paths = []
+    for idx, image in enumerate(images):
+        pil = to_pil_rgb(image)
+        path = os.path.join(tmp_dir, f"{idx:02d}.png")
+        pil.save(path)
+        image_paths.append(path)
+    prediction = model.inference(image_paths)
+    return [depth for depth in prediction.depth]

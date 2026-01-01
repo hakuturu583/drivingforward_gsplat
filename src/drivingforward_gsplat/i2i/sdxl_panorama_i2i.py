@@ -1,7 +1,6 @@
 import argparse
 import math
 import os
-import tempfile
 from typing import List, Optional, Sequence
 
 import numpy as np
@@ -9,7 +8,6 @@ import torch
 from PIL import Image
 from skimage import feature
 
-from depth_anything_3.api import DepthAnything3
 from diffusers import ControlNetModel, StableDiffusionXLControlNetImg2ImgPipeline
 from huggingface_hub import snapshot_download
 
@@ -17,7 +15,7 @@ from drivingforward_gsplat.dataset import EnvNuScenesDataset, get_transforms
 from drivingforward_gsplat.utils import misc as utils
 from drivingforward_gsplat.i2i.prompt_config import PromptConfig
 from drivingforward_gsplat.i2i.sdxl_panorama_i2i_config import SdxlPanoramaI2IConfig
-from drivingforward_gsplat.depth.depth import to_pil_depth
+from drivingforward_gsplat.depth.depth import dense_depth_from_anything, to_pil_depth
 from drivingforward_gsplat.utils.misc import to_pil_rgb
 from drivingforward_gsplat.panorama.panorama import (
     ImageLike,
@@ -234,23 +232,6 @@ def _build_env_dataset(cfg, mode: str):
     return EnvNuScenesDataset(split, **dataset_args)
 
 
-def _dense_depth_from_anything(
-    images: Sequence[ImageLike],
-    device: torch.device,
-    model_id: str,
-) -> List[np.ndarray]:
-    model = DepthAnything3.from_pretrained(model_id).to(device=device)
-    tmp_dir = tempfile.mkdtemp(prefix="da3_depth_")
-    image_paths = []
-    for idx, image in enumerate(images):
-        pil = to_pil_rgb(image)
-        path = os.path.join(tmp_dir, f"{idx:02d}.png")
-        pil.save(path)
-        image_paths.append(path)
-    prediction = model.inference(image_paths)
-    return [depth for depth in prediction.depth]
-
-
 def _control_image_from_canny(image_strip: Image.Image) -> Image.Image:
     gray = np.array(image_strip.convert("L"), dtype=np.float32) / 255.0
     edges = feature.canny(gray, sigma=2.0)
@@ -277,11 +258,11 @@ def _build_control_images(
             controls.append(_control_image_from_canny(image_strip))
         elif "depth" in controlnet_id.lower():
             if depths is None:
-                depths = _dense_depth_from_anything(
+                depths = dense_depth_from_anything(
                     images, depth_device, depth_model_id
                 )
             control_strip = _concat_strip(
-                [_to_pil_depth(d) for d in depths],
+                [to_pil_depth(d) for d in depths],
                 height or image_strip.height,
             ).convert("RGB")
             controls.append(control_strip)
