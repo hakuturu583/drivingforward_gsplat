@@ -2,7 +2,7 @@ import argparse
 import math
 import os
 import tempfile
-from typing import List, Optional, Sequence, Union
+from typing import List, Optional, Sequence
 
 import numpy as np
 import torch
@@ -17,9 +17,15 @@ from drivingforward_gsplat.dataset import EnvNuScenesDataset, get_transforms
 from drivingforward_gsplat.utils import misc as utils
 from drivingforward_gsplat.i2i.prompt_config import PromptConfig
 from drivingforward_gsplat.i2i.sdxl_panorama_i2i_config import SdxlPanoramaI2IConfig
+from drivingforward_gsplat.panorama.depth import to_pil_depth
+from drivingforward_gsplat.panorama.panorama import (
+    ImageLike,
+    _concat_strip,
+    _to_pil_rgb,
+    build_depth_panorama,
+    build_strip_panorama,
+)
 
-
-ImageLike = Union[Image.Image, np.ndarray, torch.Tensor]
 
 def _find_project_root(start_dir: str) -> str:
     current = os.path.abspath(start_dir)
@@ -30,94 +36,6 @@ def _find_project_root(start_dir: str) -> str:
         if parent == current:
             raise FileNotFoundError("pyproject.toml not found in parent directories.")
         current = parent
-
-
-def _tensor_to_numpy_uint8(tensor: torch.Tensor) -> np.ndarray:
-    arr = tensor.detach().cpu()
-    if arr.ndim == 3 and arr.shape[0] in (1, 3, 4):
-        arr = arr.permute(1, 2, 0)
-    arr = arr.numpy()
-    if arr.dtype != np.uint8:
-        arr = np.clip(arr, 0.0, 1.0) * 255.0
-    return arr.astype(np.uint8)
-
-
-def _to_pil_rgb(image: ImageLike) -> Image.Image:
-    if isinstance(image, Image.Image):
-        return image.convert("RGB")
-    if isinstance(image, torch.Tensor):
-        return Image.fromarray(_tensor_to_numpy_uint8(image)).convert("RGB")
-    if isinstance(image, np.ndarray):
-        if image.ndim == 2:
-            return Image.fromarray(image).convert("RGB")
-        if image.ndim == 3 and image.shape[-1] in (1, 3, 4):
-            return Image.fromarray(image.astype(np.uint8)).convert("RGB")
-    raise TypeError(f"Unsupported image type: {type(image)}")
-
-
-def _to_pil_depth(image: ImageLike) -> Image.Image:
-    if isinstance(image, Image.Image):
-        return image.convert("L")
-    if isinstance(image, torch.Tensor):
-        arr = image.detach().cpu()
-        if arr.ndim == 3 and arr.shape[0] == 1:
-            arr = arr[0]
-        arr = arr.numpy()
-        arr = np.clip(arr, 0.0, 1.0) * 255.0
-        return Image.fromarray(arr.astype(np.uint8), mode="L")
-    if isinstance(image, np.ndarray):
-        if image.ndim == 2:
-            return Image.fromarray(image.astype(np.uint8), mode="L")
-        if image.ndim == 3 and image.shape[-1] in (1, 3, 4):
-            return Image.fromarray(image.astype(np.uint8)).convert("L")
-    raise TypeError(f"Unsupported depth type: {type(image)}")
-
-
-def _normalize_depths(depths: Sequence[ImageLike]) -> List[Image.Image]:
-    arrays = []
-    for depth in depths:
-        if isinstance(depth, Image.Image):
-            arrays.append(np.array(depth.convert("L"), dtype=np.float32))
-        elif isinstance(depth, torch.Tensor):
-            arr = depth.detach().cpu()
-            if arr.ndim == 3 and arr.shape[0] == 1:
-                arr = arr[0]
-            arrays.append(arr.numpy().astype(np.float32))
-        elif isinstance(depth, np.ndarray):
-            arrays.append(depth.astype(np.float32))
-        else:
-            raise TypeError(f"Unsupported depth type: {type(depth)}")
-
-    stacked = np.stack(arrays, axis=0)
-    depth_min = float(np.nanmin(stacked))
-    depth_max = float(np.nanmax(stacked))
-    if math.isfinite(depth_min) and math.isfinite(depth_max) and depth_max > depth_min:
-        norm = (stacked - depth_min) / (depth_max - depth_min)
-    else:
-        norm = np.zeros_like(stacked, dtype=np.float32)
-    norm = (norm * 255.0).clip(0, 255).astype(np.uint8)
-    return [Image.fromarray(frame, mode="L") for frame in norm]
-
-
-def _concat_strip(images: Sequence[Image.Image], height: Optional[int]) -> Image.Image:
-    if not images:
-        raise ValueError("No images provided for strip panorama.")
-    if height is None:
-        height = images[0].height
-    resized = []
-    for img in images:
-        if img.height != height:
-            width = int(round(img.width * (height / img.height)))
-            resized.append(img.resize((width, height), resample=Image.BICUBIC))
-        else:
-            resized.append(img)
-    total_width = sum(img.width for img in resized)
-    out = Image.new(resized[0].mode, (total_width, height))
-    x = 0
-    for img in resized:
-        out.paste(img, (x, 0))
-        x += img.width
-    return out
 
 
 def _blend_strip_segments(
@@ -232,15 +150,12 @@ class SdxlPanoramaI2I:
         blend_width: int = 0,
         return_target_size: bool = False,
     ) -> Image.Image:
-        if len(images) != 6:
-            raise ValueError(f"Expected 6 images, got {len(images)}")
-        pil_images = [_to_pil_rgb(img) for img in images]
-        target_width = sum(img.width for img in pil_images)
-        target_height = pil_images[0].height
-        strip = _concat_strip(pil_images, height)
-        if return_target_size:
-            return strip, (target_width, target_height)
-        return strip
+        return build_strip_panorama(
+            images,
+            height=height,
+            blend_width=blend_width,
+            return_target_size=return_target_size,
+        )
 
     def build_depth_panorama(
         self,
@@ -248,12 +163,7 @@ class SdxlPanoramaI2I:
         height: Optional[int] = None,
         blend_width: int = 0,
     ) -> Image.Image:
-        if len(depths) != 6:
-            raise ValueError(f"Expected 6 depth maps, got {len(depths)}")
-        depth_frames = _normalize_depths(depths)
-        pil_depths = [_to_pil_depth(d) for d in depth_frames]
-        depth_strip = _concat_strip(pil_depths, height)
-        return depth_strip.convert("RGB")
+        return build_depth_panorama(depths, height=height, blend_width=blend_width)
 
     def generate(
         self,
