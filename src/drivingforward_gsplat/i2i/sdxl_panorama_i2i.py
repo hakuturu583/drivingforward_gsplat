@@ -17,7 +17,7 @@ from drivingforward_gsplat.dataset import EnvNuScenesDataset, get_transforms
 from drivingforward_gsplat.utils import misc as utils
 from drivingforward_gsplat.i2i.prompt_config import PromptConfig
 from drivingforward_gsplat.i2i.sdxl_panorama_i2i_config import SdxlPanoramaI2IConfig
-from drivingforward_gsplat.panorama.depth import to_pil_depth
+from drivingforward_gsplat.depth.depth import to_pil_depth
 from drivingforward_gsplat.panorama.panorama import (
     ImageLike,
     _concat_strip,

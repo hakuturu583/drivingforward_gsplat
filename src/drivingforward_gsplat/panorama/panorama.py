@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from drivingforward_gsplat.panorama.depth import normalize_depths, to_pil_depth
+from drivingforward_gsplat.depth.depth import normalize_depths, to_pil_depth
 
 
 ImageLike = Union[Image.Image, np.ndarray, torch.Tensor]
