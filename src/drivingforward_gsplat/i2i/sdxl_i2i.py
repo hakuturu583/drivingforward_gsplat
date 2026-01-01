@@ -148,6 +148,29 @@ def _blend_strip_segments(
     return Image.fromarray(strip, mode="RGB")
 
 
+def _split_strip_by_widths(
+    image_strip: Image.Image, widths: Sequence[int]
+) -> List[Image.Image]:
+    segments = []
+    x0 = 0
+    for width in widths:
+        x1 = x0 + width
+        segments.append(image_strip.crop((x0, 0, x1, image_strip.height)))
+        x0 = x1
+    return segments
+
+
+def _output_path_from_nuscenes_filename(
+    output_dir: str, nuscenes_filename: str
+) -> str:
+    rel_path = (
+        os.path.relpath(nuscenes_filename, "samples")
+        if nuscenes_filename.startswith("samples/")
+        else nuscenes_filename
+    )
+    return os.path.join(output_dir, "samples", rel_path)
+
+
 class SdxlStripPanoramaI2I:
     def __init__(
         self,
@@ -161,6 +184,7 @@ class SdxlStripPanoramaI2I:
         ip_adapter_model_id: Optional[str] = None,
         ip_adapter_subfolder: Optional[str] = None,
         ip_adapter_weight_name: Optional[str] = None,
+        ip_adapter_image_encoder_folder: Optional[str] = None,
         ip_adapter_scale: float = 1.0,
     ) -> None:
         if device is None:
@@ -196,6 +220,8 @@ class SdxlStripPanoramaI2I:
                 ip_adapter_kwargs["subfolder"] = ip_adapter_subfolder
             if ip_adapter_weight_name:
                 ip_adapter_kwargs["weight_name"] = ip_adapter_weight_name
+            if ip_adapter_image_encoder_folder is not None:
+                ip_adapter_kwargs["image_encoder_folder"] = ip_adapter_image_encoder_folder
             self.pipe.load_ip_adapter(ip_adapter_model_id, **ip_adapter_kwargs)
             self.pipe.set_ip_adapter_scale(ip_adapter_scale)
 
@@ -435,6 +461,11 @@ def main():
         )
 
     sample = dataset[i2i_cfg.sample_index]
+    sample_token = sample.get("token")
+    if sample_token is None:
+        raise ValueError("Sample token is missing from dataset output.")
+    nusc_dataset = dataset._dataset.dataset
+    nusc_sample = nusc_dataset.get("sample", sample_token)
     images_tensor = sample[("color", 0, 0)]
     cam_order = [
         "CAM_FRONT_RIGHT",
@@ -446,6 +477,10 @@ def main():
     ]
     cam_to_index = {name: idx for idx, name in enumerate(cfg["data"]["cameras"])}
     images = [images_tensor[cam_to_index[name]] for name in cam_order]
+    cam_filenames = [
+        nusc_dataset.get("sample_data", nusc_sample["data"][name])["filename"]
+        for name in cam_order
+    ]
     depth_device = torch.device(i2i_cfg.depth_device)
     controlnet_ids = [item.id for item in i2i_cfg.control_nets]
     control_scales = [item.scale for item in i2i_cfg.control_nets]
@@ -488,6 +523,7 @@ def main():
         ip_adapter_model_id=i2i_cfg.ip_adapter_model_id if use_ip_adapter else None,
         ip_adapter_subfolder=i2i_cfg.ip_adapter_subfolder,
         ip_adapter_weight_name=i2i_cfg.ip_adapter_weight_name,
+        ip_adapter_image_encoder_folder=i2i_cfg.ip_adapter_image_encoder_folder,
         ip_adapter_scale=i2i_cfg.ip_adapter_scale,
     )
     os.makedirs(i2i_cfg.output_dir, exist_ok=True)
@@ -514,6 +550,15 @@ def main():
         blend_width=i2i_cfg.blend_width,
     )
     blended.save(os.path.join(i2i_cfg.output_dir, "output_image.png"))
+    blended_segments = _split_strip_by_widths(
+        blended, widths=[img.width for img in [_to_pil_rgb(img) for img in images]]
+    )
+    for cam_filename, segment in zip(cam_filenames, blended_segments):
+        out_path = _output_path_from_nuscenes_filename(
+            i2i_cfg.output_dir, cam_filename
+        )
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        segment.save(out_path)
 
 
 if __name__ == "__main__":

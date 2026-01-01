@@ -22,6 +22,7 @@ class SdxlI2IConfig:
     ip_adapter_model_id: Optional[str] = None
     ip_adapter_subfolder: Optional[str] = None
     ip_adapter_weight_name: Optional[str] = None
+    ip_adapter_image_encoder_folder: Optional[str] = None
     ip_adapter_scale: float = 1.0
     control_nets: List[ControlNetConfig] = field(
         default_factory=lambda: [
