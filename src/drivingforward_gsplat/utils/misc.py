@@ -97,3 +97,14 @@ def cal_depth_error(pred, target):
     a2 = (thresh < 1.25 ** 2).float().mean()
     a3 = (thresh < 1.25 ** 3).float().mean()
     return abs_rel, sq_rel, rmse, rmse_log, a1, a2, a3
+
+
+def find_project_root(start_dir: str) -> str:
+    current = os.path.abspath(start_dir)
+    while True:
+        if os.path.isfile(os.path.join(current, "pyproject.toml")):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            raise FileNotFoundError("pyproject.toml not found in parent directories.")
+        current = parent

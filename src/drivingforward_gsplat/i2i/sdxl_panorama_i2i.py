@@ -27,17 +27,6 @@ from drivingforward_gsplat.panorama.panorama import (
 )
 
 
-def _find_project_root(start_dir: str) -> str:
-    current = os.path.abspath(start_dir)
-    while True:
-        if os.path.isfile(os.path.join(current, "pyproject.toml")):
-            return current
-        parent = os.path.dirname(current)
-        if parent == current:
-            raise FileNotFoundError("pyproject.toml not found in parent directories.")
-        current = parent
-
-
 def _blend_strip_segments(
     image_strip: Image.Image, widths: Sequence[int], blend_width: int
 ) -> Image.Image:
@@ -143,28 +132,6 @@ class SdxlPanoramaI2I:
             self.pipe.load_ip_adapter(ip_adapter_model_id, **ip_adapter_kwargs)
             self.pipe.set_ip_adapter_scale(ip_adapter_scale)
 
-    def build_strip_panorama(
-        self,
-        images: Sequence[ImageLike],
-        height: Optional[int] = None,
-        blend_width: int = 0,
-        return_target_size: bool = False,
-    ) -> Image.Image:
-        return build_strip_panorama(
-            images,
-            height=height,
-            blend_width=blend_width,
-            return_target_size=return_target_size,
-        )
-
-    def build_depth_panorama(
-        self,
-        depths: Sequence[ImageLike],
-        height: Optional[int] = None,
-        blend_width: int = 0,
-    ) -> Image.Image:
-        return build_depth_panorama(depths, height=height, blend_width=blend_width)
-
     def generate(
         self,
         prompt: str,
@@ -180,11 +147,11 @@ class SdxlPanoramaI2I:
         control_image: Optional[Image.Image] = None,
         ip_adapter_images: Optional[Sequence[Image.Image]] = None,
     ) -> Image.Image:
-        image_strip, target_size = self.build_strip_panorama(
+        image_strip, target_size = build_strip_panorama(
             images, height=height, return_target_size=True
         )
         if control_image is None:
-            control_strip = self.build_depth_panorama(
+            control_strip = build_depth_panorama(
                 depths, height=height or image_strip.height
             )
         else:
@@ -340,7 +307,7 @@ def sdxl_panorama_i2i(
     i2i_cfg: SdxlPanoramaI2IConfig, images: Sequence[ImageLike]
 ) -> List[Image.Image]:
     repo_root = os.getcwd()
-    project_root = _find_project_root(repo_root)
+    project_root = utils.find_project_root(repo_root)
     if not i2i_cfg.prompt_config:
         raise ValueError("prompt_config is required in SdxlPanoramaI2IConfig.")
     if len(images) != 6:
