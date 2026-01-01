@@ -512,7 +512,7 @@ def _parse_args():
         "--controlnet_id", default="diffusers/controlnet-depth-sdxl-1.0"
     )
     parser.add_argument("--torchscript_dir", default="torchscript")
-    parser.add_argument("--depth_device", default="cpu")
+    parser.add_argument("--depth_device", default="cuda")
     parser.add_argument("--strength", type=float, default=0.6)
     parser.add_argument("--steps", type=int, default=30)
     parser.add_argument("--guidance_scale", type=float, default=5.0)
