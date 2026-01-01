@@ -16,7 +16,7 @@ from huggingface_hub import snapshot_download
 from drivingforward_gsplat.dataset import EnvNuScenesDataset, get_transforms
 from drivingforward_gsplat.utils import misc as utils
 from drivingforward_gsplat.i2i.prompt_config import PromptConfig
-from drivingforward_gsplat.i2i.sdxl_i2i_config import SdxlI2IConfig
+from drivingforward_gsplat.i2i.sdxl_panorama_i2i_config import SdxlPanoramaI2IConfig
 
 
 ImageLike = Union[Image.Image, np.ndarray, torch.Tensor]
@@ -171,7 +171,7 @@ def _output_path_from_nuscenes_filename(
     return os.path.join(output_dir, "samples", rel_path)
 
 
-class SdxlStripPanoramaI2I:
+class SdxlPanoramaI2I:
     def __init__(
         self,
         model_id: str = "stabilityai/stable-diffusion-xl-base-1.0",
@@ -421,8 +421,10 @@ def _build_control_images(
 
 
 def _parse_args():
-    parser = argparse.ArgumentParser(description="SDXL strip panorama i2i")
-    parser.add_argument("--config", required=True, help="Path to SDXL i2i yaml config.")
+    parser = argparse.ArgumentParser(description="SDXL panorama i2i")
+    parser.add_argument(
+        "--config", required=True, help="Path to SDXL panorama i2i yaml config."
+    )
     parser.add_argument(
         "--prompt-config",
         required=True,
@@ -431,16 +433,11 @@ def _parse_args():
     return parser.parse_args()
 
 
-def main():
-    args = _parse_args()
+def sdxl_panorama_i2i(i2i_cfg: SdxlPanoramaI2IConfig) -> None:
     repo_root = os.getcwd()
     project_root = _find_project_root(repo_root)
-    cfg_path = (
-        args.config
-        if os.path.isabs(args.config)
-        else os.path.join(repo_root, args.config)
-    )
-    i2i_cfg = SdxlI2IConfig.from_yaml(cfg_path)
+    if not i2i_cfg.prompt_config:
+        raise ValueError("prompt_config is required in SdxlPanoramaI2IConfig.")
     config_file = (
         i2i_cfg.config_file
         if os.path.isabs(i2i_cfg.config_file)
@@ -493,9 +490,9 @@ def main():
     )
 
     prompt_path = (
-        args.prompt_config
-        if os.path.isabs(args.prompt_config)
-        else os.path.join(repo_root, args.prompt_config)
+        i2i_cfg.prompt_config
+        if os.path.isabs(i2i_cfg.prompt_config)
+        else os.path.join(repo_root, i2i_cfg.prompt_config)
     )
     prompt_cfg = PromptConfig.from_yaml(prompt_path)
     prompt = prompt_cfg.prompt
@@ -514,7 +511,7 @@ def main():
         )
         reference_images.append(Image.open(abs_path).convert("RGB"))
 
-    i2i = SdxlStripPanoramaI2I(
+    i2i = SdxlPanoramaI2I(
         model_id=i2i_cfg.model_id,
         controlnet_ids=controlnet_ids,
         enable_cpu_offload=i2i_cfg.cpu_offload,
@@ -559,6 +556,19 @@ def main():
         )
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         segment.save(out_path)
+
+
+def main():
+    args = _parse_args()
+    repo_root = os.getcwd()
+    cfg_path = (
+        args.config
+        if os.path.isabs(args.config)
+        else os.path.join(repo_root, args.config)
+    )
+    i2i_cfg = SdxlPanoramaI2IConfig.from_yaml(cfg_path)
+    i2i_cfg.prompt_config = args.prompt_config
+    sdxl_panorama_i2i(i2i_cfg)
 
 
 if __name__ == "__main__":
