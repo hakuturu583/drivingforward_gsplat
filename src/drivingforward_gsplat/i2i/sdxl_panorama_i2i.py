@@ -426,51 +426,15 @@ def _parse_args():
     return parser.parse_args()
 
 
-def sdxl_panorama_i2i(i2i_cfg: SdxlPanoramaI2IConfig) -> None:
+def sdxl_panorama_i2i(
+    i2i_cfg: SdxlPanoramaI2IConfig, images: Sequence[ImageLike]
+) -> List[Image.Image]:
     repo_root = os.getcwd()
     project_root = _find_project_root(repo_root)
     if not i2i_cfg.prompt_config:
         raise ValueError("prompt_config is required in SdxlPanoramaI2IConfig.")
-    config_file = (
-        i2i_cfg.config_file
-        if os.path.isabs(i2i_cfg.config_file)
-        else os.path.join(repo_root, i2i_cfg.config_file)
-    )
-
-    cfg = utils.get_config(
-        config_file,
-        mode="eval",
-        weight_path=repo_root,
-        novel_view_mode="SF",
-    )
-    dataset = _build_env_dataset(cfg, "eval")
-
-    if len(cfg["data"]["cameras"]) != 6:
-        raise ValueError(
-            f"Expected 6 cameras for strip panorama, got {len(cfg['data']['cameras'])}"
-        )
-
-    sample = dataset[i2i_cfg.sample_index]
-    sample_token = sample.get("token")
-    if sample_token is None:
-        raise ValueError("Sample token is missing from dataset output.")
-    nusc_dataset = dataset._dataset.dataset
-    nusc_sample = nusc_dataset.get("sample", sample_token)
-    images_tensor = sample[("color", 0, 0)]
-    cam_order = [
-        "CAM_FRONT_RIGHT",
-        "CAM_FRONT",
-        "CAM_FRONT_LEFT",
-        "CAM_BACK_LEFT",
-        "CAM_BACK",
-        "CAM_BACK_RIGHT",
-    ]
-    cam_to_index = {name: idx for idx, name in enumerate(cfg["data"]["cameras"])}
-    images = [images_tensor[cam_to_index[name]] for name in cam_order]
-    cam_filenames = [
-        nusc_dataset.get("sample_data", nusc_sample["data"][name])["filename"]
-        for name in cam_order
-    ]
+    if len(images) != 6:
+        raise ValueError(f"Expected 6 camera images, got {len(images)}.")
     depth_device = torch.device(i2i_cfg.depth_device)
     controlnet_ids = [item.id for item in i2i_cfg.control_nets]
     control_scales = [item.scale for item in i2i_cfg.control_nets]
@@ -516,10 +480,6 @@ def sdxl_panorama_i2i(i2i_cfg: SdxlPanoramaI2IConfig) -> None:
         ip_adapter_image_encoder_folder=i2i_cfg.ip_adapter_image_encoder_folder,
         ip_adapter_scale=i2i_cfg.ip_adapter_scale,
     )
-    os.makedirs(i2i_cfg.output_dir, exist_ok=True)
-    image_strip.save(os.path.join(i2i_cfg.output_dir, "input_image.png"))
-    for idx, control in enumerate(control_strips):
-        control.save(os.path.join(i2i_cfg.output_dir, f"control_map_{idx}.png"))
     result = i2i.generate(
         prompt=prompt,
         negative_prompt=negative_prompt,
@@ -539,16 +499,10 @@ def sdxl_panorama_i2i(i2i_cfg: SdxlPanoramaI2IConfig) -> None:
         widths=[img.width for img in [_to_pil_rgb(img) for img in images]],
         blend_width=i2i_cfg.blend_width,
     )
-    blended.save(os.path.join(i2i_cfg.output_dir, "output_image.png"))
     blended_segments = _split_strip_by_widths(
         blended, widths=[img.width for img in [_to_pil_rgb(img) for img in images]]
     )
-    for cam_filename, segment in zip(cam_filenames, blended_segments):
-        out_path = _output_path_from_nuscenes_filename(
-            i2i_cfg.output_dir, cam_filename
-        )
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
-        segment.save(out_path)
+    return blended_segments
 
 
 def main():
@@ -561,7 +515,51 @@ def main():
     )
     i2i_cfg = SdxlPanoramaI2IConfig.from_yaml(cfg_path)
     i2i_cfg.prompt_config = args.prompt_config
-    sdxl_panorama_i2i(i2i_cfg)
+    config_file = (
+        i2i_cfg.config_file
+        if os.path.isabs(i2i_cfg.config_file)
+        else os.path.join(repo_root, i2i_cfg.config_file)
+    )
+    cfg = utils.get_config(
+        config_file,
+        mode="eval",
+        weight_path=repo_root,
+        novel_view_mode="SF",
+    )
+    dataset = _build_env_dataset(cfg, "eval")
+    if len(cfg["data"]["cameras"]) != 6:
+        raise ValueError(
+            f"Expected 6 cameras for strip panorama, got {len(cfg['data']['cameras'])}"
+        )
+    sample = dataset[i2i_cfg.sample_index]
+    sample_token = sample.get("token")
+    if sample_token is None:
+        raise ValueError("Sample token is missing from dataset output.")
+    nusc_dataset = dataset._dataset.dataset
+    nusc_sample = nusc_dataset.get("sample", sample_token)
+    images_tensor = sample[("color", 0, 0)]
+    cam_order = [
+        "CAM_FRONT_RIGHT",
+        "CAM_FRONT",
+        "CAM_FRONT_LEFT",
+        "CAM_BACK_LEFT",
+        "CAM_BACK",
+        "CAM_BACK_RIGHT",
+    ]
+    cam_to_index = {name: idx for idx, name in enumerate(cfg["data"]["cameras"])}
+    images = [images_tensor[cam_to_index[name]] for name in cam_order]
+    cam_filenames = [
+        nusc_dataset.get("sample_data", nusc_sample["data"][name])["filename"]
+        for name in cam_order
+    ]
+    blended_segments = sdxl_panorama_i2i(i2i_cfg, images)
+    os.makedirs(i2i_cfg.output_dir, exist_ok=True)
+    for cam_filename, segment in zip(cam_filenames, blended_segments):
+        out_path = _output_path_from_nuscenes_filename(
+            i2i_cfg.output_dir, cam_filename
+        )
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        segment.save(out_path)
 
 
 if __name__ == "__main__":
