@@ -12,8 +12,6 @@ class ControlNetConfig:
 
 @dataclass
 class SdxlI2IConfig:
-    prompt: str
-    negative_prompt: Optional[str] = None
     config_file: str = "configs/nuscenes/main.yaml"
     output_dir: str = "output"
     novel_view_mode: str = "MF"

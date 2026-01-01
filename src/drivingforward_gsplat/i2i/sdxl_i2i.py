@@ -15,6 +15,7 @@ from huggingface_hub import snapshot_download
 
 from drivingforward_gsplat.dataset import EnvNuScenesDataset, get_transforms
 from drivingforward_gsplat.utils import misc as utils
+from drivingforward_gsplat.i2i.prompt_config import PromptConfig
 from drivingforward_gsplat.i2i.sdxl_i2i_config import SdxlI2IConfig
 
 
@@ -370,6 +371,11 @@ def _build_control_images(
 def _parse_args():
     parser = argparse.ArgumentParser(description="SDXL strip panorama i2i")
     parser.add_argument("--config", required=True, help="Path to SDXL i2i yaml config.")
+    parser.add_argument(
+        "--prompt-config",
+        required=True,
+        help="Path to SDXL prompt yaml config.",
+    )
     return parser.parse_args()
 
 
@@ -436,9 +442,17 @@ def main():
     for idx, control in enumerate(control_strips):
         control.save(os.path.join(i2i_cfg.output_dir, f"control_map_{idx}.png"))
 
+    prompt_path = (
+        args.prompt_config
+        if os.path.isabs(args.prompt_config)
+        else os.path.join(repo_root, args.prompt_config)
+    )
+    prompt_cfg = PromptConfig.from_yaml(prompt_path)
+    prompt = prompt_cfg.prompt
+    negative_prompt = prompt_cfg.negative_prompt
     result = i2i.generate(
-        prompt=i2i_cfg.prompt,
-        negative_prompt=i2i_cfg.negative_prompt,
+        prompt=prompt,
+        negative_prompt=negative_prompt,
         images=images,
         depths=[],
         height=i2i_cfg.height,
