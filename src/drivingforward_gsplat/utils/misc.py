@@ -1,8 +1,13 @@
 import os
+from typing import Union
+
+import numpy as np
+import torch
 import yaml
+from PIL import Image
 from collections import defaultdict
 
-import torch
+ImageLike = Union[Image.Image, np.ndarray, torch.Tensor]
 
 _NUSC_CAM_LIST = [
     "CAM_FRONT",
@@ -97,3 +102,37 @@ def cal_depth_error(pred, target):
     a2 = (thresh < 1.25 ** 2).float().mean()
     a3 = (thresh < 1.25 ** 3).float().mean()
     return abs_rel, sq_rel, rmse, rmse_log, a1, a2, a3
+
+
+def find_project_root(start_dir: str) -> str:
+    current = os.path.abspath(start_dir)
+    while True:
+        if os.path.isfile(os.path.join(current, "pyproject.toml")):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            raise FileNotFoundError("pyproject.toml not found in parent directories.")
+        current = parent
+
+
+def tensor_to_numpy_uint8(tensor: torch.Tensor) -> np.ndarray:
+    arr = tensor.detach().cpu()
+    if arr.ndim == 3 and arr.shape[0] in (1, 3, 4):
+        arr = arr.permute(1, 2, 0)
+    arr = arr.numpy()
+    if arr.dtype != np.uint8:
+        arr = np.clip(arr, 0.0, 1.0) * 255.0
+    return arr.astype(np.uint8)
+
+
+def to_pil_rgb(image: ImageLike) -> Image.Image:
+    if isinstance(image, Image.Image):
+        return image.convert("RGB")
+    if isinstance(image, torch.Tensor):
+        return Image.fromarray(tensor_to_numpy_uint8(image)).convert("RGB")
+    if isinstance(image, np.ndarray):
+        if image.ndim == 2:
+            return Image.fromarray(image).convert("RGB")
+        if image.ndim == 3 and image.shape[-1] in (1, 3, 4):
+            return Image.fromarray(image.astype(np.uint8)).convert("RGB")
+    raise TypeError(f"Unsupported image type: {type(image)}")

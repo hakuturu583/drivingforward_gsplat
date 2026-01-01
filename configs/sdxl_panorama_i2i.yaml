@@ -1,6 +1,5 @@
 config_file: "configs/nuscenes/main.yaml"
 output_dir: "output"
-novel_view_mode: "MF"
 sample_index: 0
 height: null
 blend_width: 0

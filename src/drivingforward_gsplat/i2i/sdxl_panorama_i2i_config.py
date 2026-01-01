@@ -3,21 +3,17 @@ from typing import List, Optional
 
 import yaml
 
-
-@dataclass
-class ControlNetConfig:
-    id: str
-    scale: float = 1.0
+from drivingforward_gsplat.i2i.controlnet import ControlNetConfig
 
 
 @dataclass
-class SdxlI2IConfig:
+class SdxlPanoramaI2IConfig:
     config_file: str = "configs/nuscenes/main.yaml"
     output_dir: str = "output"
-    novel_view_mode: str = "MF"
     sample_index: int = 0
     height: Optional[int] = None
     blend_width: int = 0
+    prompt_config: Optional[str] = None
     model_id: str = "stabilityai/stable-diffusion-xl-base-1.0"
     ip_adapter_model_id: Optional[str] = None
     ip_adapter_subfolder: Optional[str] = None
@@ -40,7 +36,7 @@ class SdxlI2IConfig:
     seed: Optional[int] = None
 
     @classmethod
-    def from_yaml(cls, path: str) -> "SdxlI2IConfig":
+    def from_yaml(cls, path: str) -> "SdxlPanoramaI2IConfig":
         with open(path, "r") as f:
             data = yaml.safe_load(f) or {}
         if "control_nets" in data:
