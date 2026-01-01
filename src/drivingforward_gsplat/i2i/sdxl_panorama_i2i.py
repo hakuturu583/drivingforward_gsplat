@@ -352,14 +352,7 @@ def _build_env_dataset(cfg, mode: str):
     if mode == "train":
         split = "train"
     else:
-        if cfg["model"]["novel_view_mode"] == "MF":
-            split = "eval_MF"
-        elif cfg["model"]["novel_view_mode"] == "SF":
-            split = "eval_SF"
-        else:
-            raise ValueError(
-                f"Unknown novel view mode: {cfg['model']['novel_view_mode']}"
-            )
+        split = "eval_SF"
 
     return EnvNuScenesDataset(split, **dataset_args)
 
@@ -448,7 +441,7 @@ def sdxl_panorama_i2i(i2i_cfg: SdxlPanoramaI2IConfig) -> None:
         config_file,
         mode="eval",
         weight_path=repo_root,
-        novel_view_mode=i2i_cfg.novel_view_mode,
+        novel_view_mode="SF",
     )
     dataset = _build_env_dataset(cfg, "eval")
 

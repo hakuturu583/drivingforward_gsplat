@@ -14,7 +14,6 @@ class ControlNetConfig:
 class SdxlPanoramaI2IConfig:
     config_file: str = "configs/nuscenes/main.yaml"
     output_dir: str = "output"
-    novel_view_mode: str = "MF"
     sample_index: int = 0
     height: Optional[int] = None
     blend_width: int = 0
