@@ -191,7 +191,7 @@ class DrivingForwardTrainer:
                 for sample_idx, token in enumerate(tokens):
                     token_safe = str(token).replace("/", "_").replace(os.sep, "_")
                     output_path = os.path.join(
-                        self.log_dir, token_safe, "output.ply"
+                        self.log_dir, "gaussians", token_safe, "output.ply"
                     )
                     save_gaussians_as_ply(
                         outputs,
