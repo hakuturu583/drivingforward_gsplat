@@ -1,26 +1,18 @@
 import argparse
 import os
 from datetime import datetime
-from typing import Dict, Iterable, List, Mapping, Sequence, Tuple, Union
-
 import numpy as np
 import torch
-from PIL import Image
 
-from drivingforward_gsplat.depth.depth import (
-    dense_depth_from_anything,
-    normalize_depths,
-    resize_depths_to_match,
+from drivingforward_gsplat.models.drivingforward_model import (
+    DrivingForwardModel,
+    _NO_DEVICE_KEYS,
 )
-from drivingforward_gsplat.network.blocks import pack_cam_feat, unpack_cam_feat
-from drivingforward_gsplat.models.gaussian.utils import depth2pc
 from drivingforward_gsplat.utils.gaussian_ply import (
     save_gaussians_as_inria_ply,
     save_gaussians_as_ply,
 )
-from drivingforward_gsplat.utils.misc import ImageLike, get_config, to_pil_rgb
-
-CamImages = Union[Sequence[ImageLike], Mapping[str, ImageLike]]
+from drivingforward_gsplat.utils.misc import get_config
 
 CAM_ORDER = [
     "CAM_FRONT_RIGHT",
@@ -32,160 +24,158 @@ CAM_ORDER = [
 ]
 
 
-def _ensure_cam_order(images: CamImages, cam_order: Sequence[str]) -> List[ImageLike]:
-    if isinstance(images, Mapping):
-        missing = [name for name in cam_order if name not in images]
-        if missing:
-            raise ValueError(f"Missing camera images for: {missing}")
-        return [images[name] for name in cam_order]
-    if len(images) != len(cam_order):
-        raise ValueError(
-            f"Expected {len(cam_order)} images, but got {len(images)} instead."
-        )
-    return list(images)
+def _ensure_dir(path: str) -> None:
+    if path:
+        os.makedirs(path, exist_ok=True)
 
 
-def _resize_to_first(images: Iterable[Image.Image]) -> List[Image.Image]:
-    images = list(images)
-    if not images:
-        return []
-    target_size = images[0].size
-    return [
-        img if img.size == target_size else img.resize(target_size) for img in images
-    ]
+def _timestamp_token(token: str) -> str:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    token_safe = str(token).replace("/", "_").replace(os.sep, "_")
+    return f"{timestamp}_{token_safe}"
 
 
-def _pil_to_chw_tensor(image: Image.Image, channels: int) -> torch.Tensor:
-    arr = np.asarray(image, dtype=np.float32)
-    if channels == 1:
-        if arr.ndim == 3:
-            arr = arr[..., 0]
-        arr = arr[None, ...]
-        arr = arr / 255.0
-        return torch.from_numpy(arr)
-    if arr.ndim == 2:
-        arr = np.repeat(arr[..., None], 3, axis=-1)
-    arr = arr.transpose(2, 0, 1) / 255.0
-    return torch.from_numpy(arr)
+def _to_tensor(value):
+    if torch.is_tensor(value):
+        return value
+    if isinstance(value, np.ndarray):
+        return torch.from_numpy(value)
+    if isinstance(value, list):
+        return [_to_tensor(item) for item in value]
+    return value
 
 
-def _extract_depth_encoder(depth_encoder: torch.nn.Module) -> torch.nn.Module:
-    return depth_encoder.encoder if hasattr(depth_encoder, "encoder") else depth_encoder
+def _add_batch_dim(value):
+    if torch.is_tensor(value):
+        return value.unsqueeze(0)
+    if isinstance(value, np.ndarray):
+        return np.expand_dims(value, 0)
+    if isinstance(value, list) and value:
+        if torch.is_tensor(value[0]):
+            return [item.unsqueeze(0) for item in value]
+        if isinstance(value[0], np.ndarray):
+            return [np.expand_dims(item, 0) for item in value]
+    return value
 
 
-def _ensure_feature_list(
-    feats: Union[Sequence[torch.Tensor], torch.Tensor]
-) -> List[torch.Tensor]:
-    if isinstance(feats, torch.Tensor):
-        return [feats]
-    return list(feats)
+def _add_batch_dim_to_inputs(inputs: dict) -> dict:
+    for key, value in inputs.items():
+        if key in _NO_DEVICE_KEYS:
+            continue
+        inputs[key] = _add_batch_dim(value)
+    return inputs
 
 
-def _select_matching_features(
-    feats: Sequence[torch.Tensor], depth_feats: Sequence[torch.Tensor]
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    matches: List[torch.Tensor] = []
-    for depth_feat in depth_feats:
-        target_hw = depth_feat.shape[-2:]
-        candidates = [feat for feat in feats if feat.shape[-2:] == target_hw]
-        if not candidates:
-            raise RuntimeError(
-                f"No image features match depth feature size {target_hw}."
+def _move_inputs_to_device(inputs: dict, device: torch.device) -> dict:
+    for key, value in inputs.items():
+        if key in _NO_DEVICE_KEYS:
+            continue
+        value = _to_tensor(value)
+        if torch.is_tensor(value):
+            inputs[key] = value.float().to(device)
+        elif isinstance(value, list):
+            inputs[key] = [
+                item.float().to(device) if torch.is_tensor(item) else item
+                for item in value
+            ]
+        else:
+            inputs[key] = value
+    return inputs
+
+
+class TorchScriptDepthNet(torch.nn.Module):
+    def __init__(self, cfg, torchscript_dir, mode, device):
+        super().__init__()
+        self.num_cams = cfg["data"]["num_cams"]
+        self.fusion_level = cfg["model"]["fusion_level"]
+        self.mode = mode
+        enc_path = os.path.join(torchscript_dir, f"depth_encoder_{mode}.pt")
+        dec_path = os.path.join(torchscript_dir, f"depth_decoder_{mode}.pt")
+        self.depth_encoder = torch.jit.load(enc_path, map_location=device).eval()
+        self.depth_decoder = torch.jit.load(dec_path, map_location=device).eval()
+
+    def _run_one(self, images, mask, k, inv_k, extrinsics, extrinsics_inv):
+        (
+            feat0,
+            feat1,
+            proj_feat,
+            img_feat0,
+            img_feat1,
+            img_feat2,
+        ) = self.depth_encoder(images, mask, k, inv_k, extrinsics, extrinsics_inv)
+        disp = self.depth_decoder(feat0, feat1, proj_feat)
+        img_feat = (img_feat0, img_feat1, img_feat2)
+        return disp, img_feat
+
+    def forward(self, inputs):
+        outputs = {}
+        for cam in range(self.num_cams):
+            outputs[("cam", cam)] = {}
+
+        images = inputs[("color_aug", 0, 0)]
+        mask = inputs["mask"]
+        k = inputs[("K", self.fusion_level + 1)]
+        inv_k = inputs[("inv_K", self.fusion_level + 1)]
+        extrinsics = inputs["extrinsics"]
+        extrinsics_inv = inputs["extrinsics_inv"]
+
+        if self.mode == "MF":
+            images_last = inputs[("color_aug", -1, 0)]
+            images_next = inputs[("color_aug", 1, 0)]
+            enc_out = self.depth_encoder(
+                images,
+                images_last,
+                images_next,
+                mask,
+                k,
+                inv_k,
+                extrinsics,
+                extrinsics_inv,
             )
-        matches.append(candidates[0])
-    if len(matches) != 3:
-        raise RuntimeError(
-            f"Expected 3 matched image features, got {len(matches)} instead."
-        )
-    return matches[0], matches[1], matches[2]
+            feat0, feat1, proj_feat, img_feat0, img_feat1, img_feat2 = enc_out[:6]
+            (
+                feat0_last,
+                feat1_last,
+                proj_feat_last,
+                img_feat0_last,
+                img_feat1_last,
+                img_feat2_last,
+            ) = enc_out[6:12]
+            (
+                feat0_next,
+                feat1_next,
+                proj_feat_next,
+                img_feat0_next,
+                img_feat1_next,
+                img_feat2_next,
+            ) = enc_out[12:18]
+            disp_cur = self.depth_decoder(feat0, feat1, proj_feat)
+            disp_last = self.depth_decoder(feat0_last, feat1_last, proj_feat_last)
+            disp_next = self.depth_decoder(feat0_next, feat1_next, proj_feat_next)
+            img_feat_cur = (img_feat0, img_feat1, img_feat2)
+            img_feat_last = (img_feat0_last, img_feat1_last, img_feat2_last)
+            img_feat_next = (img_feat0_next, img_feat1_next, img_feat2_next)
+        else:
+            disp_cur, img_feat_cur = self._run_one(
+                images, mask, k, inv_k, extrinsics, extrinsics_inv
+            )
 
+        for cam in range(self.num_cams):
+            outputs[("cam", cam)][("disp", 0)] = disp_cur[:, cam, ...]
+            outputs[("cam", cam)][("img_feat", 0, 0)] = [
+                feat[:, cam, ...] for feat in img_feat_cur
+            ]
+            if self.mode == "MF":
+                outputs[("cam", cam)][("disp", -1, 0)] = disp_last[:, cam, ...]
+                outputs[("cam", cam)][("disp", 1, 0)] = disp_next[:, cam, ...]
+                outputs[("cam", cam)][("img_feat", -1, 0)] = [
+                    feat[:, cam, ...] for feat in img_feat_last
+                ]
+                outputs[("cam", cam)][("img_feat", 1, 0)] = [
+                    feat[:, cam, ...] for feat in img_feat_next
+                ]
 
-@torch.no_grad()
-def predict_gaussians_from_images(
-    images: CamImages,
-    depth_encoder: torch.nn.Module,
-    gaussian_net: torch.nn.Module,
-    depth_device: torch.device,
-    depth_model_id: str,
-    intrinsics: Sequence[np.ndarray] | Mapping[str, np.ndarray] | None = None,
-    cam_order: Sequence[str] = CAM_ORDER,
-) -> Tuple[Dict[str, Dict[str, torch.Tensor]], List[Image.Image]]:
-    """
-    Predict gaussian parameters from 6 camera images in cam_order.
-
-    Returns a dict keyed by camera name and a list of normalized depth images.
-    """
-    ordered_images = _ensure_cam_order(images, cam_order)
-    pil_images = [to_pil_rgb(img) for img in ordered_images]
-    pil_images = _resize_to_first(pil_images)
-
-    intrinsics_list = None
-    if intrinsics is not None:
-        intrinsics_list = _ensure_cam_order(intrinsics, cam_order)
-        intrinsics_list = [np.asarray(k) for k in intrinsics_list]
-    depths = dense_depth_from_anything(
-        pil_images,
-        depth_device,
-        depth_model_id,
-        intrinsics=intrinsics_list,
-    )
-    depth_pils = normalize_depths(depths)
-    depth_pils = resize_depths_to_match(pil_images, depth_pils)
-
-    image_tensors = [_pil_to_chw_tensor(img, channels=3) for img in pil_images]
-    depth_tensors = [_pil_to_chw_tensor(img, channels=1) for img in depth_pils]
-
-    image_batch = torch.stack(image_tensors, dim=0).unsqueeze(0)
-    depth_batch = torch.stack(depth_tensors, dim=0).unsqueeze(0)
-
-    device = next(gaussian_net.parameters()).device
-    image_batch = image_batch.to(device=device)
-    depth_batch = depth_batch.to(device=device)
-
-    packed_images = pack_cam_feat(image_batch)
-    packed_depths = pack_cam_feat(depth_batch)
-
-    encoder = _extract_depth_encoder(depth_encoder)
-    encoder = encoder.to(device=device).eval()
-    gaussian_net = gaussian_net.to(device=device).eval()
-
-    feats = _ensure_feature_list(encoder(packed_images))
-
-    depth_encoder_module = None
-    if hasattr(gaussian_net, "gaussian_encoder"):
-        depth_encoder_module = gaussian_net.gaussian_encoder
-    elif hasattr(gaussian_net, "depth_encoder"):
-        depth_encoder_module = gaussian_net.depth_encoder
-
-    if depth_encoder_module is not None:
-        depth_feats = _ensure_feature_list(depth_encoder_module(packed_depths))
-        img_feat = _select_matching_features(feats, depth_feats)
-    else:
-        if len(feats) < 3:
-            raise RuntimeError("Not enough image features to feed gaussian network.")
-        img_feat = (feats[0], feats[1], feats[2])
-
-    rot, scale, opacity, sh = gaussian_net(packed_images, packed_depths, img_feat)
-
-    bsz = image_batch.shape[0]
-    num_cams = image_batch.shape[1]
-    outputs: Dict[str, Dict[str, torch.Tensor]] = {}
-    rot = unpack_cam_feat(rot, bsz, num_cams)
-    scale = unpack_cam_feat(scale, bsz, num_cams)
-    opacity = unpack_cam_feat(opacity, bsz, num_cams)
-    sh = sh.view(bsz, num_cams, *sh.shape[1:])
-    depth_out = unpack_cam_feat(packed_depths, bsz, num_cams)
-
-    for idx, cam in enumerate(cam_order):
-        outputs[cam] = {
-            "rot": rot[:, idx, ...],
-            "scale": scale[:, idx, ...],
-            "opacity": opacity[:, idx, ...],
-            "sh": sh[:, idx, ...],
-            "depth": depth_out[:, idx, ...],
-        }
-
-    return outputs, depth_pils
+        return outputs
 
 
 class TorchScriptGaussianNet(torch.nn.Module):
@@ -210,66 +200,42 @@ class TorchScriptGaussianNet(torch.nn.Module):
         )
 
 
-def _stacked_images_to_list(images: torch.Tensor) -> List[torch.Tensor]:
-    if images.ndim != 4:
-        raise ValueError(f"Expected stacked images as (N, C, H, W), got {images.shape}")
-    return [images[idx] for idx in range(images.shape[0])]
+class GtPoseDrivingForwardModel(DrivingForwardModel):
+    def __init__(self, cfg, torchscript_dir, device):
+        self.torchscript_dir = torchscript_dir
+        self.device = device
+        super().__init__(cfg, rank=0)
 
+    def prepare_dataset(self, cfg, rank):
+        return
 
-def _ensure_dir(path: str) -> None:
-    if path:
-        os.makedirs(path, exist_ok=True)
+    def prepare_model(self, cfg, rank):
+        mode = cfg["model"]["novel_view_mode"]
+        models = {
+            "pose_net": torch.nn.Identity(),
+            "depth_net": TorchScriptDepthNet(
+                cfg, self.torchscript_dir, mode, self.device
+            ),
+        }
+        if self.gaussian:
+            models["gs_net"] = TorchScriptGaussianNet(
+                self.torchscript_dir, mode, self.device
+            )
+        return models
 
+    def load_weights(self):
+        if self.rank == 0:
+            print("Skipping weight loading for torchscript mode.")
 
-def _timestamp_token(token: str) -> str:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    token_safe = str(token).replace("/", "_").replace(os.sep, "_")
-    return f"{timestamp}_{token_safe}"
-
-
-def _gaussians_to_outputs(
-    sample: Dict,
-    gaussians: Dict[str, Dict[str, torch.Tensor]],
-    cam_order: Sequence[str],
-) -> Dict[Tuple[str, int], Dict[Tuple[str, int, int], torch.Tensor]]:
-    outputs: Dict[Tuple[str, int], Dict[Tuple[str, int, int], torch.Tensor]] = {}
-    intrinsics = sample[("K", 0)]
-    extrinsics = sample["extrinsics"]
-    if isinstance(intrinsics, torch.Tensor):
-        intrinsics_np = intrinsics.detach().cpu().numpy()
-    else:
-        intrinsics_np = intrinsics
-    if isinstance(extrinsics, torch.Tensor):
-        extrinsics_np = extrinsics.detach().cpu().numpy()
-    else:
-        extrinsics_np = extrinsics
-    for cam_idx, cam in enumerate(cam_order):
-        cam_out: Dict[Tuple[str, int, int], torch.Tensor] = {}
-        cam_gauss = gaussians[cam]
-        depth = cam_gauss["depth"]
-        device = depth.device
-        intr = torch.from_numpy(intrinsics_np[cam_idx]).to(
-            device=device, dtype=depth.dtype
-        )
-        extr = torch.from_numpy(extrinsics_np[cam_idx]).to(
-            device=device, dtype=depth.dtype
-        )
-        if intr.ndim == 2:
-            intr = intr.unsqueeze(0)
-        if extr.ndim == 2:
-            extr = extr.unsqueeze(0)
-        extr_inv = torch.inverse(extr)
-        xyz = depth2pc(depth, extr_inv, intr)
-        pts_valid = depth.view(depth.shape[0], -1) != 0.0
-
-        cam_out[("xyz", 0, 0)] = xyz
-        cam_out[("pts_valid", 0, 0)] = pts_valid
-        cam_out[("rot_maps", 0, 0)] = cam_gauss["rot"]
-        cam_out[("scale_maps", 0, 0)] = cam_gauss["scale"]
-        cam_out[("opacity_maps", 0, 0)] = cam_gauss["opacity"]
-        cam_out[("sh_maps", 0, 0)] = cam_gauss["sh"]
-        outputs[("cam", cam_idx)] = cam_out
-    return outputs
+    def predict_pose(self, inputs):
+        outputs = {}
+        for cam in range(self.num_cams):
+            outputs[("cam", cam)] = {}
+            for frame_id in self.frame_ids[1:]:
+                outputs[("cam", cam)][("cam_T_cam", 0, frame_id)] = inputs[
+                    ("cam_T_cam", 0, frame_id)
+                ][:, cam, ...]
+        return outputs
 
 
 def main() -> None:
@@ -298,20 +264,10 @@ def main() -> None:
         help="Torchscript directory (relative or absolute).",
     )
     parser.add_argument(
-        "--depth-encoder-path",
-        default=None,
-        help="Optional path to a depth encoder torchscript module.",
-    )
-    parser.add_argument(
         "--novel-view-mode",
         default="MF",
         choices=("MF", "SF"),
         help="Model variant for torchscript files.",
-    )
-    parser.add_argument(
-        "--depth-model-id",
-        default="depth-anything/DA3METRIC-LARGE",
-        help="Depth Anything 3 model id.",
     )
     parser.add_argument(
         "--output-path",
@@ -347,34 +303,21 @@ def main() -> None:
     )
 
     sample = dataset[args.index]
-    images = _stacked_images_to_list(sample[("color", 0, 0)])
-    intrinsics = [k[:3, :3] for k in sample[("K", 0)]]
-
-    device = torch.device(
-        "cpu" if args.cpu or not torch.cuda.is_available() else "cuda"
-    )
-    depth_device = device
-
-    depth_encoder_path = args.depth_encoder_path or os.path.join(
-        args.torchscript_dir, f"depth_encoder_{args.novel_view_mode}.pt"
-    )
-    depth_encoder = torch.jit.load(depth_encoder_path, map_location=device).eval()
-    gaussian_net = TorchScriptGaussianNet(
-        args.torchscript_dir, args.novel_view_mode, device
-    )
-
-    gaussians, _ = predict_gaussians_from_images(
-        images=images,
-        depth_encoder=depth_encoder,
-        gaussian_net=gaussian_net,
-        depth_device=depth_device,
-        depth_model_id=args.depth_model_id,
-        cam_order=CAM_ORDER,
-        intrinsics=intrinsics,
-    )
+    if args.cpu or not torch.cuda.is_available():
+        raise RuntimeError("TorchScript DrivingForward inference requires CUDA.")
+    device = torch.device("cuda")
 
     token = sample.get("token", f"index_{args.index}")
-    outputs = _gaussians_to_outputs(sample, gaussians, CAM_ORDER)
+    inputs = _add_batch_dim_to_inputs(sample)
+    inputs = _move_inputs_to_device(inputs, device)
+    model = GtPoseDrivingForwardModel(cfg, args.torchscript_dir, device)
+    model.set_eval()
+    with torch.no_grad():
+        outputs = model.estimate(inputs)
+        if getattr(model, "gaussian", False):
+            model.gs_net = model.models["gs_net"]
+            for cam in range(model.num_cams):
+                model.get_gaussian_data(inputs, outputs, cam)
     output_dir = os.path.join(args.output_path, _timestamp_token(str(token)))
     _ensure_dir(output_dir)
     output_path = os.path.join(output_dir, "output.ply")
@@ -382,15 +325,15 @@ def main() -> None:
     save_gaussians_as_ply(
         outputs,
         output_path,
-        cam_num=len(CAM_ORDER),
-        mode="SF",
+        cam_num=model.num_cams,
+        mode=model.novel_view_mode,
         sample_idx=0,
     )
     save_gaussians_as_inria_ply(
         outputs,
         output_inria_path,
-        cam_num=len(CAM_ORDER),
-        mode="SF",
+        cam_num=model.num_cams,
+        mode=model.novel_view_mode,
         sample_idx=0,
     )
     print(f"Saved gaussians: {output_path}")
