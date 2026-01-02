@@ -73,6 +73,31 @@ def _extract_depth_encoder(depth_encoder: torch.nn.Module) -> torch.nn.Module:
     return depth_encoder.encoder if hasattr(depth_encoder, "encoder") else depth_encoder
 
 
+def _ensure_feature_list(feats: Union[Sequence[torch.Tensor], torch.Tensor]) -> List[torch.Tensor]:
+    if isinstance(feats, torch.Tensor):
+        return [feats]
+    return list(feats)
+
+
+def _select_matching_features(
+    feats: Sequence[torch.Tensor], depth_feats: Sequence[torch.Tensor]
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    matches: List[torch.Tensor] = []
+    for depth_feat in depth_feats:
+        target_hw = depth_feat.shape[-2:]
+        candidates = [feat for feat in feats if feat.shape[-2:] == target_hw]
+        if not candidates:
+            raise RuntimeError(
+                f"No image features match depth feature size {target_hw}."
+            )
+        matches.append(candidates[0])
+    if len(matches) != 3:
+        raise RuntimeError(
+            f"Expected 3 matched image features, got {len(matches)} instead."
+        )
+    return matches[0], matches[1], matches[2]
+
+
 @torch.no_grad()
 def predict_gaussians_from_images(
     images: CamImages,
@@ -112,8 +137,23 @@ def predict_gaussians_from_images(
     encoder = encoder.to(device=device).eval()
     gaussian_net = gaussian_net.to(device=device).eval()
 
-    feats = encoder(packed_images)
-    img_feat = (feats[0], feats[1], feats[2])
+    feats = _ensure_feature_list(encoder(packed_images))
+
+    depth_encoder_module = None
+    if hasattr(gaussian_net, "gaussian_encoder"):
+        depth_encoder_module = gaussian_net.gaussian_encoder
+    elif hasattr(gaussian_net, "depth_encoder"):
+        depth_encoder_module = gaussian_net.depth_encoder
+
+    if depth_encoder_module is not None:
+        depth_feats = _ensure_feature_list(depth_encoder_module(packed_depths))
+        img_feat = _select_matching_features(feats, depth_feats)
+    else:
+        if len(feats) < 3:
+            raise RuntimeError(
+                "Not enough image features to feed gaussian network."
+            )
+        img_feat = (feats[0], feats[1], feats[2])
 
     rot, scale, opacity, sh = gaussian_net(packed_images, packed_depths, img_feat)
 
