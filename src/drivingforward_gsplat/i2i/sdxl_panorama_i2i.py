@@ -97,6 +97,7 @@ class SdxlPanoramaI2I:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
         self.torch_dtype = torch_dtype
+        self._cpu_offload_enabled = device == "cuda" and enable_cpu_offload
 
         controlnet = [
             ControlNetModel.from_pretrained(controlnet_id, torch_dtype=torch_dtype)
@@ -137,6 +138,14 @@ class SdxlPanoramaI2I:
                 enable_sequential_offload=enable_sequential_offload,
                 enable_xformers=enable_xformers,
             )
+
+    def _maybe_swap_pipelines(self, active_pipe, inactive_pipe) -> None:
+        if self.device != "cuda" or self._cpu_offload_enabled:
+            return
+        if inactive_pipe is not None:
+            inactive_pipe.to("cpu")
+        active_pipe.to(self.device)
+        torch.cuda.empty_cache()
 
     @staticmethod
     def _configure_pipeline(
@@ -209,6 +218,8 @@ class SdxlPanoramaI2I:
         }
         if ip_adapter_images:
             pipe_kwargs["ip_adapter_image"] = ip_adapter_images
+        if self.refiner_pipe is not None:
+            self._maybe_swap_pipelines(self.pipe, self.refiner_pipe)
         result = self.pipe(**pipe_kwargs)
         output = result.images[0]
         if height is not None and output.size != target_size:
@@ -227,6 +238,7 @@ class SdxlPanoramaI2I:
     ) -> List[Image.Image]:
         if self.refiner_pipe is None:
             return list(images)
+        self._maybe_swap_pipelines(self.refiner_pipe, self.pipe)
         refined = []
         for idx, image in enumerate(images):
             generator = None
@@ -242,6 +254,7 @@ class SdxlPanoramaI2I:
                 generator=generator,
             )
             refined.append(result.images[0])
+        self._maybe_swap_pipelines(self.pipe, self.refiner_pipe)
         return refined
 
 
