@@ -76,7 +76,27 @@ def dense_depth_from_anything(
     images: Sequence[ImageLike],
     device: torch.device,
     model_id: str,
+    intrinsics: np.ndarray | Sequence[np.ndarray] | None = None,
 ) -> List[np.ndarray]:
+    if intrinsics is not None:
+        if isinstance(intrinsics, np.ndarray):
+            if intrinsics.ndim == 2:
+                if len(images) != 1:
+                    raise ValueError(
+                        "Expected 1 image to match a single intrinsics matrix."
+                    )
+            elif intrinsics.ndim == 3:
+                if intrinsics.shape[0] != len(images):
+                    raise ValueError(
+                        "Intrinsics batch size must match number of images."
+                    )
+            else:
+                raise ValueError(
+                    "Intrinsics must be a 2D matrix or a batch of 2D matrices."
+                )
+        else:
+            if len(intrinsics) != len(images):
+                raise ValueError("Intrinsics must match number of images.")
     model = DepthAnything3.from_pretrained(model_id).to(device=device)
     tmp_dir = tempfile.mkdtemp(prefix="da3_depth_")
     image_paths = []
@@ -85,5 +105,11 @@ def dense_depth_from_anything(
         path = os.path.join(tmp_dir, f"{idx:02d}.png")
         pil.save(path)
         image_paths.append(path)
-    prediction = model.inference(image_paths)
+    intrinsics_arr = None
+    if intrinsics is not None:
+        if isinstance(intrinsics, np.ndarray):
+            intrinsics_arr = intrinsics
+        else:
+            intrinsics_arr = np.stack(list(intrinsics), axis=0)
+    prediction = model.inference(image_paths, intrinsics=intrinsics_arr)
     return [depth for depth in prediction.depth]

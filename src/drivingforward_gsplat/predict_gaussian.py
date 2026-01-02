@@ -73,7 +73,9 @@ def _extract_depth_encoder(depth_encoder: torch.nn.Module) -> torch.nn.Module:
     return depth_encoder.encoder if hasattr(depth_encoder, "encoder") else depth_encoder
 
 
-def _ensure_feature_list(feats: Union[Sequence[torch.Tensor], torch.Tensor]) -> List[torch.Tensor]:
+def _ensure_feature_list(
+    feats: Union[Sequence[torch.Tensor], torch.Tensor]
+) -> List[torch.Tensor]:
     if isinstance(feats, torch.Tensor):
         return [feats]
     return list(feats)
@@ -105,6 +107,7 @@ def predict_gaussians_from_images(
     gaussian_net: torch.nn.Module,
     depth_device: torch.device,
     depth_model_id: str,
+    intrinsics: Sequence[np.ndarray] | Mapping[str, np.ndarray] | None = None,
     cam_order: Sequence[str] = CAM_ORDER,
 ) -> Tuple[Dict[str, Dict[str, torch.Tensor]], List[Image.Image]]:
     """
@@ -116,7 +119,16 @@ def predict_gaussians_from_images(
     pil_images = [to_pil_rgb(img) for img in ordered_images]
     pil_images = _resize_to_first(pil_images)
 
-    depths = dense_depth_from_anything(pil_images, depth_device, depth_model_id)
+    intrinsics_list = None
+    if intrinsics is not None:
+        intrinsics_list = _ensure_cam_order(intrinsics, cam_order)
+        intrinsics_list = [np.asarray(k) for k in intrinsics_list]
+    depths = dense_depth_from_anything(
+        pil_images,
+        depth_device,
+        depth_model_id,
+        intrinsics=intrinsics_list,
+    )
     depth_pils = normalize_depths(depths)
     depth_pils = resize_depths_to_match(pil_images, depth_pils)
 
@@ -150,9 +162,7 @@ def predict_gaussians_from_images(
         img_feat = _select_matching_features(feats, depth_feats)
     else:
         if len(feats) < 3:
-            raise RuntimeError(
-                "Not enough image features to feed gaussian network."
-            )
+            raise RuntimeError("Not enough image features to feed gaussian network.")
         img_feat = (feats[0], feats[1], feats[2])
 
     rot, scale, opacity, sh = gaussian_net(packed_images, packed_depths, img_feat)
@@ -338,6 +348,7 @@ def main() -> None:
 
     sample = dataset[args.index]
     images = _stacked_images_to_list(sample[("color", 0, 0)])
+    intrinsics = [k[:3, :3] for k in sample[("K", 0)]]
 
     device = torch.device(
         "cpu" if args.cpu or not torch.cuda.is_available() else "cuda"
@@ -359,6 +370,7 @@ def main() -> None:
         depth_device=depth_device,
         depth_model_id=args.depth_model_id,
         cam_order=CAM_ORDER,
+        intrinsics=intrinsics,
     )
 
     token = sample.get("token", f"index_{args.index}")
