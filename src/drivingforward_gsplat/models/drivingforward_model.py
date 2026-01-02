@@ -71,14 +71,14 @@ class DrivingForwardModel(BaseModel):
         return models
 
     def set_posenet(self, cfg):
-        from drivingforward_gsplat.network import PoseNetwork
-
-        return PoseNetwork(cfg).cuda()
+        raise RuntimeError(
+            "PoseNetwork is not available in this TorchScript-only build."
+        )
 
     def set_depthnet(self, cfg):
-        from drivingforward_gsplat.network import DepthNetwork
-
-        return DepthNetwork(cfg).cuda()
+        raise RuntimeError(
+            "DepthNetwork is not available in this TorchScript-only build."
+        )
 
     def set_gaussiannet(self, cfg):
         return GaussianNetwork(rgb_dim=3, depth_dim=1).cuda()
