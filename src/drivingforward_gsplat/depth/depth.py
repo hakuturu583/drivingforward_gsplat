@@ -58,6 +58,20 @@ def normalize_depths(depths: Sequence[ImageLike]) -> List[Image.Image]:
     return [Image.fromarray(frame, mode="L") for frame in norm]
 
 
+def resize_depths_to_match(
+    images: Sequence[Image.Image], depths: Sequence[Image.Image]
+) -> List[Image.Image]:
+    if not images:
+        return list(depths)
+    target_size = images[0].size
+    return [
+        depth
+        if depth.size == target_size
+        else depth.resize(target_size, Image.BILINEAR)
+        for depth in depths
+    ]
+
+
 def dense_depth_from_anything(
     images: Sequence[ImageLike],
     device: torch.device,

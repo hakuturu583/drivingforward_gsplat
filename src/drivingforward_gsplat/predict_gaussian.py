@@ -7,7 +7,11 @@ import numpy as np
 import torch
 from PIL import Image
 
-from drivingforward_gsplat.depth.depth import dense_depth_from_anything, normalize_depths
+from drivingforward_gsplat.depth.depth import (
+    dense_depth_from_anything,
+    normalize_depths,
+    resize_depths_to_match,
+)
 from drivingforward_gsplat.network.blocks import pack_cam_feat, unpack_cam_feat
 from drivingforward_gsplat.models.gaussian.utils import depth2pc
 from drivingforward_gsplat.utils.gaussian_ply import (
@@ -46,7 +50,9 @@ def _resize_to_first(images: Iterable[Image.Image]) -> List[Image.Image]:
     if not images:
         return []
     target_size = images[0].size
-    return [img if img.size == target_size else img.resize(target_size) for img in images]
+    return [
+        img if img.size == target_size else img.resize(target_size) for img in images
+    ]
 
 
 def _pil_to_chw_tensor(image: Image.Image, channels: int) -> torch.Tensor:
@@ -87,6 +93,7 @@ def predict_gaussians_from_images(
 
     depths = dense_depth_from_anything(pil_images, depth_device, depth_model_id)
     depth_pils = normalize_depths(depths)
+    depth_pils = resize_depths_to_match(pil_images, depth_pils)
 
     image_tensors = [_pil_to_chw_tensor(img, channels=3) for img in pil_images]
     depth_tensors = [_pil_to_chw_tensor(img, channels=1) for img in depth_pils]
@@ -286,13 +293,15 @@ def main() -> None:
         depth_type=None,
         with_pose=True,
         with_ego_pose=True,
-        with_mask=False,
+        with_mask=True,
     )
 
     sample = dataset[args.index]
     images = _stacked_images_to_list(sample[("color", 0, 0)])
 
-    device = torch.device("cpu" if args.cpu or not torch.cuda.is_available() else "cuda")
+    device = torch.device(
+        "cpu" if args.cpu or not torch.cuda.is_available() else "cuda"
+    )
     depth_device = device
 
     depth_encoder_path = args.depth_encoder_path or os.path.join(
