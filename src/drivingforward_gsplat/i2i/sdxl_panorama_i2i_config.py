@@ -15,6 +15,8 @@ class SdxlPanoramaI2IConfig:
     blend_width: int = 0
     prompt_config: Optional[str] = None
     model_id: str = "stabilityai/stable-diffusion-xl-base-1.0"
+    refiner_model_id: Optional[str] = "stabilityai/stable-diffusion-xl-refiner-1.0"
+    refiner_strength: float = 0.2
     ip_adapter_model_id: Optional[str] = None
     ip_adapter_subfolder: Optional[str] = None
     ip_adapter_weight_name: Optional[str] = None
