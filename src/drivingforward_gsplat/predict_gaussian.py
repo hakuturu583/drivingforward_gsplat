@@ -15,6 +15,11 @@ from drivingforward_gsplat.utils.gaussian_ply import (
     save_gaussians_as_inria_ply,
     save_gaussians_as_ply,
 )
+from drivingforward_gsplat.models.gaussian import (
+    focal2fov,
+    getProjectionMatrix,
+    pts2render,
+)
 from drivingforward_gsplat.utils.misc import get_config
 from drivingforward_gsplat.utils.misc import to_pil_rgb
 
@@ -75,15 +80,104 @@ def _timestamp_token(token: str) -> str:
     return f"{timestamp}_{token_safe}"
 
 
-def _save_debug_images(sample: dict, output_root: str, output_token: str) -> None:
-    if ("color", 0, 0) not in sample:
+def _save_input_images(
+    raw_images: Optional[torch.Tensor],
+    i2i_images: Optional[torch.Tensor],
+    output_root: str,
+    output_token: str,
+) -> None:
+    if raw_images is None and i2i_images is None:
         return
     output_dir = os.path.join(output_root, output_token)
     _ensure_dir(output_dir)
-    images = sample[("color", 0, 0)]
     for cam_name, cam_idx in zip(CAM_ORDER, range(len(CAM_ORDER))):
-        image = to_pil_rgb(images[cam_idx])
-        image.save(os.path.join(output_dir, f"{cam_name}.png"))
+        if raw_images is not None:
+            image = to_pil_rgb(raw_images[cam_idx])
+            image.save(os.path.join(output_dir, f"{cam_name}.png"))
+        if i2i_images is not None:
+            image = to_pil_rgb(i2i_images[cam_idx])
+            image.save(os.path.join(output_dir, f"{cam_name}_i2i.png"))
+
+
+def _ensure_render_params(
+    outputs: dict,
+    inputs: dict,
+    cam: int,
+    frame_id: int,
+    zfar: float,
+    znear: float,
+) -> None:
+    cam_outputs = outputs[("cam", cam)]
+    if ("FovX", frame_id, 0) in cam_outputs:
+        return
+    bs, _, height, width = inputs[("color", 0, 0)][:, cam, ...].shape
+    fovx_list = []
+    fovy_list = []
+    world_view_transform_list = []
+    full_proj_transform_list = []
+    camera_center_list = []
+    for i in range(bs):
+        intr = inputs[("K", 0)][:, cam, ...][i, :]
+        extr = inputs["extrinsics_inv"][:, cam, ...][i, :]
+        fovx = focal2fov(intr[0, 0].item(), width)
+        fovy = focal2fov(intr[1, 1].item(), height)
+        projection_matrix = getProjectionMatrix(
+            znear=znear, zfar=zfar, K=intr, h=height, w=width
+        ).to(device=intr.device, dtype=intr.dtype)
+        projection_matrix = projection_matrix.transpose(0, 1)
+        world_view_transform = extr.transpose(0, 1)
+        full_proj_transform = (
+            world_view_transform.unsqueeze(0)
+            .bmm(projection_matrix.unsqueeze(0))
+            .squeeze(0)
+        )
+        camera_center = world_view_transform.inverse()[3, :3]
+
+        fovx_list.append(fovx)
+        fovy_list.append(fovy)
+        world_view_transform_list.append(world_view_transform.unsqueeze(0))
+        full_proj_transform_list.append(full_proj_transform.unsqueeze(0))
+        camera_center_list.append(camera_center.unsqueeze(0))
+    cam_outputs[("FovX", frame_id, 0)] = torch.tensor(
+        fovx_list, device=intr.device, dtype=intr.dtype
+    )
+    cam_outputs[("FovY", frame_id, 0)] = torch.tensor(
+        fovy_list, device=intr.device, dtype=intr.dtype
+    )
+    cam_outputs[("world_view_transform", frame_id, 0)] = torch.cat(
+        world_view_transform_list, dim=0
+    )
+    cam_outputs[("full_proj_transform", frame_id, 0)] = torch.cat(
+        full_proj_transform_list, dim=0
+    )
+    cam_outputs[("camera_center", frame_id, 0)] = torch.cat(camera_center_list, dim=0)
+
+
+def _save_rendered_images(
+    outputs: dict,
+    inputs: dict,
+    cam_num: int,
+    novel_view_mode: str,
+    output_root: str,
+    output_token: str,
+    zfar: float,
+) -> None:
+    output_dir = os.path.join(output_root, output_token)
+    _ensure_dir(output_dir)
+    frame_id = 0
+    for cam_name, cam in zip(CAM_ORDER, range(cam_num)):
+        _ensure_render_params(outputs, inputs, cam, frame_id, zfar=zfar, znear=0.01)
+        rendered = pts2render(
+            inputs=inputs,
+            outputs=outputs,
+            cam_num=cam_num,
+            novel_cam=cam,
+            novel_frame_id=frame_id,
+            bg_color=[1.0, 1.0, 1.0],
+            mode=novel_view_mode,
+        )
+        image = to_pil_rgb(rendered[0])
+        image.save(os.path.join(output_dir, f"{cam_name}_render.png"))
 
 
 def _to_tensor(value):
@@ -390,6 +484,9 @@ def main() -> None:
     )
 
     sample = dataset[predict_cfg.index]
+    raw_images = sample.get(("color", 0, 0))
+    if raw_images is not None:
+        raw_images = raw_images.clone()
     if predict_cfg.sdxl_panorama_prompt_config:
         sample = _apply_sdxl_panorama_i2i(predict_cfg, sample)
     if predict_cfg.cpu or not torch.cuda.is_available():
@@ -398,7 +495,10 @@ def main() -> None:
 
     token = sample.get("token", f"index_{predict_cfg.index}")
     output_token = _timestamp_token(str(token))
-    _save_debug_images(sample, "output/images", output_token)
+    i2i_images = None
+    if predict_cfg.sdxl_panorama_prompt_config:
+        i2i_images = sample.get(("color", 0, 0))
+    _save_input_images(raw_images, i2i_images, "output/images", output_token)
     inputs = _add_batch_dim_to_inputs(sample)
     inputs = _move_inputs_to_device(inputs, device)
     model = GtPoseDrivingForwardModel(cfg, predict_cfg.torchscript_dir, device)
@@ -409,6 +509,15 @@ def main() -> None:
             model.gs_net = model.models["gs_net"]
             for cam in range(model.num_cams):
                 model.get_gaussian_data(inputs, outputs, cam)
+            _save_rendered_images(
+                outputs,
+                inputs,
+                cam_num=model.num_cams,
+                novel_view_mode=model.novel_view_mode,
+                output_root="output/images",
+                output_token=output_token,
+                zfar=model.max_depth,
+            )
     output_dir = os.path.join(predict_cfg.output_path, output_token)
     _ensure_dir(output_dir)
     output_path = os.path.join(output_dir, "output.ply")
