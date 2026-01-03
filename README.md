@@ -26,4 +26,14 @@ uv run python -m drivingforward_gsplat.predict_gaussian \
   --predict-config configs/predict_gaussian.yaml
 ```
 
-Edit `configs/predict_gaussian.yaml` to point at the model config, set the dataset split/index, and choose the torchscript directory and output path.
+Edit `configs/predict_gaussian.yaml` to point at the model config, set the dataset split/index, and choose the torchscript directory and output path. The default `sdxl_panorama_i2i_config` is always loaded, and i2i only runs when a prompt config is provided.
+
+#### Predict gaussian with SDXL i2i
+
+```bash
+uv run python -m drivingforward_gsplat.predict_gaussian \
+  --predict-config configs/predict_gaussian.yaml \
+  --sdxl-panorama-prompt-config configs/prompts/sunset.yaml
+```
+
+Use `--sdxl-panorama-prompt-config` to enable SDXL panorama i2i. The prompt config format matches the SDXL i2i tool and supports `reference_images` for IP-Adapter.

@@ -2,6 +2,7 @@ import argparse
 import os
 from datetime import datetime
 from dataclasses import dataclass
+from typing import Optional
 import numpy as np
 import torch
 import yaml
@@ -14,7 +15,13 @@ from drivingforward_gsplat.utils.gaussian_ply import (
     save_gaussians_as_inria_ply,
     save_gaussians_as_ply,
 )
+from drivingforward_gsplat.models.gaussian import (
+    focal2fov,
+    getProjectionMatrix,
+    pts2render,
+)
 from drivingforward_gsplat.utils.misc import get_config
+from drivingforward_gsplat.utils.misc import to_pil_rgb
 
 CAM_ORDER = [
     "CAM_FRONT_RIGHT",
@@ -35,6 +42,8 @@ class PredictGaussianConfig:
     novel_view_mode: str = "MF"
     output_path: str = "output/gaussians"
     cpu: bool = False
+    sdxl_panorama_i2i_config: Optional[str] = "configs/sdxl_panorama_i2i.yaml"
+    sdxl_panorama_prompt_config: Optional[str] = None
 
     @classmethod
     def from_yaml(cls, path: str) -> "PredictGaussianConfig":
@@ -51,6 +60,12 @@ class PredictGaussianConfig:
             novel_view_mode=data.get("novel_view_mode", cls.novel_view_mode),
             output_path=data.get("output_path", cls.output_path),
             cpu=bool(cpu_value),
+            sdxl_panorama_i2i_config=data.get(
+                "sdxl_panorama_i2i_config", cls.sdxl_panorama_i2i_config
+            ),
+            sdxl_panorama_prompt_config=data.get(
+                "sdxl_panorama_prompt_config", cls.sdxl_panorama_prompt_config
+            ),
         )
 
 
@@ -63,6 +78,106 @@ def _timestamp_token(token: str) -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     token_safe = str(token).replace("/", "_").replace(os.sep, "_")
     return f"{timestamp}_{token_safe}"
+
+
+def _save_input_images(
+    raw_images: Optional[torch.Tensor],
+    i2i_images: Optional[torch.Tensor],
+    output_root: str,
+    output_token: str,
+) -> None:
+    if raw_images is None and i2i_images is None:
+        return
+    output_dir = os.path.join(output_root, output_token)
+    _ensure_dir(output_dir)
+    for cam_name, cam_idx in zip(CAM_ORDER, range(len(CAM_ORDER))):
+        if raw_images is not None:
+            image = to_pil_rgb(raw_images[cam_idx])
+            image.save(os.path.join(output_dir, f"{cam_name}.png"))
+        if i2i_images is not None:
+            image = to_pil_rgb(i2i_images[cam_idx])
+            image.save(os.path.join(output_dir, f"{cam_name}_i2i.png"))
+
+
+def _ensure_render_params(
+    outputs: dict,
+    inputs: dict,
+    cam: int,
+    frame_id: int,
+    zfar: float,
+    znear: float,
+) -> None:
+    cam_outputs = outputs[("cam", cam)]
+    if ("FovX", frame_id, 0) in cam_outputs:
+        return
+    bs, _, height, width = inputs[("color", 0, 0)][:, cam, ...].shape
+    fovx_list = []
+    fovy_list = []
+    world_view_transform_list = []
+    full_proj_transform_list = []
+    camera_center_list = []
+    for i in range(bs):
+        intr = inputs[("K", 0)][:, cam, ...][i, :]
+        extr = inputs["extrinsics_inv"][:, cam, ...][i, :]
+        fovx = focal2fov(intr[0, 0].item(), width)
+        fovy = focal2fov(intr[1, 1].item(), height)
+        projection_matrix = getProjectionMatrix(
+            znear=znear, zfar=zfar, K=intr, h=height, w=width
+        ).to(device=intr.device, dtype=intr.dtype)
+        projection_matrix = projection_matrix.transpose(0, 1)
+        world_view_transform = extr.transpose(0, 1)
+        full_proj_transform = (
+            world_view_transform.unsqueeze(0)
+            .bmm(projection_matrix.unsqueeze(0))
+            .squeeze(0)
+        )
+        camera_center = world_view_transform.inverse()[3, :3]
+
+        fovx_list.append(fovx)
+        fovy_list.append(fovy)
+        world_view_transform_list.append(world_view_transform.unsqueeze(0))
+        full_proj_transform_list.append(full_proj_transform.unsqueeze(0))
+        camera_center_list.append(camera_center.unsqueeze(0))
+    cam_outputs[("FovX", frame_id, 0)] = torch.tensor(
+        fovx_list, device=intr.device, dtype=intr.dtype
+    )
+    cam_outputs[("FovY", frame_id, 0)] = torch.tensor(
+        fovy_list, device=intr.device, dtype=intr.dtype
+    )
+    cam_outputs[("world_view_transform", frame_id, 0)] = torch.cat(
+        world_view_transform_list, dim=0
+    )
+    cam_outputs[("full_proj_transform", frame_id, 0)] = torch.cat(
+        full_proj_transform_list, dim=0
+    )
+    cam_outputs[("camera_center", frame_id, 0)] = torch.cat(camera_center_list, dim=0)
+
+
+def _save_rendered_images(
+    outputs: dict,
+    inputs: dict,
+    cam_num: int,
+    novel_view_mode: str,
+    output_root: str,
+    output_token: str,
+    zfar: float,
+) -> None:
+    output_dir = os.path.join(output_root, output_token)
+    _ensure_dir(output_dir)
+    frame_id = 0
+    for cam_name, cam in zip(CAM_ORDER, range(cam_num)):
+        _ensure_render_params(outputs, inputs, cam, frame_id, zfar=zfar, znear=0.01)
+        rendered = pts2render(
+            inputs=inputs,
+            outputs=outputs,
+            cam_num=cam_num,
+            novel_cam=cam,
+            novel_frame_id=frame_id,
+            bg_color=[1.0, 1.0, 1.0],
+            mode=novel_view_mode,
+        )
+        image = to_pil_rgb(rendered[0])
+        image.save(os.path.join(output_dir, f"{cam_name}_render.png"))
 
 
 def _to_tensor(value):
@@ -111,6 +226,62 @@ def _move_inputs_to_device(inputs: dict, device: torch.device) -> dict:
         else:
             inputs[key] = value
     return inputs
+
+
+def _resolve_path(path: Optional[str]) -> Optional[str]:
+    if not path:
+        return None
+    if os.path.isabs(path):
+        return path
+    return os.path.join(os.getcwd(), path)
+
+
+def _apply_sdxl_panorama_i2i(predict_cfg: PredictGaussianConfig, sample: dict) -> dict:
+    from PIL import Image
+    import torchvision.transforms as transforms
+
+    from drivingforward_gsplat.i2i.sdxl_panorama_i2i import sdxl_panorama_i2i
+    from drivingforward_gsplat.i2i.sdxl_panorama_i2i_config import (
+        SdxlPanoramaI2IConfig,
+    )
+
+    cfg_path = _resolve_path(predict_cfg.sdxl_panorama_i2i_config)
+    if cfg_path is None:
+        raise ValueError("sdxl_panorama_i2i_config is required.")
+    i2i_cfg = SdxlPanoramaI2IConfig.from_yaml(cfg_path)
+    if predict_cfg.sdxl_panorama_prompt_config:
+        i2i_cfg.prompt_config = predict_cfg.sdxl_panorama_prompt_config
+    i2i_cfg.prompt_config = _resolve_path(i2i_cfg.prompt_config)
+    if i2i_cfg.prompt_config is None:
+        return sample
+    if predict_cfg.novel_view_mode == "SF":
+        desired_frame_ids = [0]
+    else:
+        desired_frame_ids = [0, -1, 1]
+    frame_ids = [
+        frame_id for frame_id in desired_frame_ids if ("color", frame_id, 0) in sample
+    ]
+    to_tensor = transforms.ToTensor()
+    for frame_id in frame_ids:
+        target = sample[("color", frame_id, 0)]
+        target_height, target_width = target.shape[-2], target.shape[-1]
+        images = [target[idx] for idx in range(len(CAM_ORDER))]
+        generated_images = sdxl_panorama_i2i(i2i_cfg, images)
+        converted = []
+        for image in generated_images:
+            if image.size != (target_width, target_height):
+                image = image.resize(
+                    (target_width, target_height), resample=Image.BICUBIC
+                )
+            converted.append(to_tensor(image).type_as(target))
+        if len(converted) != target.shape[0]:
+            raise ValueError(
+                f"Expected {target.shape[0]} i2i images, got {len(converted)}."
+            )
+        stacked = torch.stack(converted, dim=0)
+        sample[("color", frame_id, 0)] = stacked
+        sample[("color_aug", frame_id, 0)] = stacked.clone()
+    return sample
 
 
 class TorchScriptDepthNet(torch.nn.Module):
@@ -277,8 +448,15 @@ def main() -> None:
         default="configs/predict_gaussian.yaml",
         help="Predict gaussian config yaml file path.",
     )
+    parser.add_argument(
+        "--sdxl-panorama-prompt-config",
+        default=None,
+        help="SDXL panorama prompt yaml file path. When set, i2i is applied.",
+    )
     args = parser.parse_args()
     predict_cfg = PredictGaussianConfig.from_yaml(args.predict_config)
+    if args.sdxl_panorama_prompt_config:
+        predict_cfg.sdxl_panorama_prompt_config = args.sdxl_panorama_prompt_config
 
     from drivingforward_gsplat.dataset import EnvNuScenesDataset, get_transforms
 
@@ -306,11 +484,21 @@ def main() -> None:
     )
 
     sample = dataset[predict_cfg.index]
+    raw_images = sample.get(("color", 0, 0))
+    if raw_images is not None:
+        raw_images = raw_images.clone()
+    if predict_cfg.sdxl_panorama_prompt_config:
+        sample = _apply_sdxl_panorama_i2i(predict_cfg, sample)
     if predict_cfg.cpu or not torch.cuda.is_available():
         raise RuntimeError("TorchScript DrivingForward inference requires CUDA.")
     device = torch.device("cuda")
 
     token = sample.get("token", f"index_{predict_cfg.index}")
+    output_token = _timestamp_token(str(token))
+    i2i_images = None
+    if predict_cfg.sdxl_panorama_prompt_config:
+        i2i_images = sample.get(("color", 0, 0))
+    _save_input_images(raw_images, i2i_images, "output/images", output_token)
     inputs = _add_batch_dim_to_inputs(sample)
     inputs = _move_inputs_to_device(inputs, device)
     model = GtPoseDrivingForwardModel(cfg, predict_cfg.torchscript_dir, device)
@@ -321,7 +509,16 @@ def main() -> None:
             model.gs_net = model.models["gs_net"]
             for cam in range(model.num_cams):
                 model.get_gaussian_data(inputs, outputs, cam)
-    output_dir = os.path.join(predict_cfg.output_path, _timestamp_token(str(token)))
+            _save_rendered_images(
+                outputs,
+                inputs,
+                cam_num=model.num_cams,
+                novel_view_mode=model.novel_view_mode,
+                output_root="output/images",
+                output_token=output_token,
+                zfar=model.max_depth,
+            )
+    output_dir = os.path.join(predict_cfg.output_path, output_token)
     _ensure_dir(output_dir)
     output_path = os.path.join(output_dir, "output.ply")
     output_inria_path = os.path.join(output_dir, "output_inria.ply")
