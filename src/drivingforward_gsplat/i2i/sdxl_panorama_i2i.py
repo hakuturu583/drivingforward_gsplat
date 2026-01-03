@@ -7,7 +7,11 @@ import numpy as np
 import torch
 from PIL import Image
 
-from diffusers import ControlNetModel, StableDiffusionXLControlNetImg2ImgPipeline
+from diffusers import (
+    ControlNetModel,
+    StableDiffusionXLControlNetImg2ImgPipeline,
+    StableDiffusionXLImg2ImgPipeline,
+)
 from huggingface_hub import snapshot_download
 
 from drivingforward_gsplat.dataset import EnvNuScenesDataset, get_transforms
@@ -76,6 +80,7 @@ class SdxlPanoramaI2I:
     def __init__(
         self,
         model_id: str = "stabilityai/stable-diffusion-xl-base-1.0",
+        refiner_model_id: Optional[str] = None,
         controlnet_ids: Sequence[str] = ("diffusers/controlnet-depth-sdxl-1.0",),
         device: Optional[str] = None,
         torch_dtype: torch.dtype = torch.float16,
@@ -92,6 +97,9 @@ class SdxlPanoramaI2I:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
         self.torch_dtype = torch_dtype
+        self._cpu_offload_enabled = device == "cuda" and enable_cpu_offload
+        self._last_prompt: Optional[str] = None
+        self._last_negative_prompt: Optional[str] = None
 
         controlnet = [
             ControlNetModel.from_pretrained(controlnet_id, torch_dtype=torch_dtype)
@@ -100,21 +108,13 @@ class SdxlPanoramaI2I:
         self.pipe = StableDiffusionXLControlNetImg2ImgPipeline.from_pretrained(
             model_id, controlnet=controlnet, torch_dtype=torch_dtype
         )
-
-        if device == "cuda" and enable_cpu_offload:
-            if enable_sequential_offload:
-                self.pipe.enable_sequential_cpu_offload()
-            else:
-                self.pipe.enable_model_cpu_offload()
-            self.pipe.enable_attention_slicing()
-        else:
-            self.pipe.to(device)
-
-        if enable_xformers:
-            try:
-                self.pipe.enable_xformers_memory_efficient_attention()
-            except (AttributeError, ImportError):
-                pass
+        self._configure_pipeline(
+            self.pipe,
+            device=device,
+            enable_cpu_offload=enable_cpu_offload,
+            enable_sequential_offload=enable_sequential_offload,
+            enable_xformers=enable_xformers,
+        )
         if ip_adapter_model_id:
             ip_adapter_kwargs = {}
             if ip_adapter_subfolder:
@@ -127,6 +127,67 @@ class SdxlPanoramaI2I:
                 ] = ip_adapter_image_encoder_folder
             self.pipe.load_ip_adapter(ip_adapter_model_id, **ip_adapter_kwargs)
             self.pipe.set_ip_adapter_scale(ip_adapter_scale)
+
+        self.refiner_pipe = None
+        if refiner_model_id:
+            self.refiner_pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(
+                refiner_model_id, torch_dtype=torch_dtype
+            )
+            self._configure_pipeline(
+                self.refiner_pipe,
+                device=device,
+                enable_cpu_offload=enable_cpu_offload,
+                enable_sequential_offload=enable_sequential_offload,
+                enable_xformers=enable_xformers,
+            )
+
+    def _maybe_swap_pipelines(self, active_pipe, inactive_pipe) -> None:
+        if self.device != "cuda" or self._cpu_offload_enabled:
+            return
+        if inactive_pipe is not None:
+            inactive_pipe.to("cpu")
+        active_pipe.to(self.device)
+        torch.cuda.empty_cache()
+
+    @staticmethod
+    def _configure_pipeline(
+        pipe,
+        device: str,
+        enable_cpu_offload: bool,
+        enable_sequential_offload: bool,
+        enable_xformers: bool,
+    ) -> None:
+        pipe.set_progress_bar_config(disable=True)
+        pipe.enable_attention_slicing()
+        try:
+            pipe.enable_vae_slicing()
+            pipe.enable_vae_tiling()
+        except AttributeError:
+            pass
+        pipe.unet.eval()
+        if hasattr(pipe, "vae") and pipe.vae is not None:
+            pipe.vae.eval()
+        if hasattr(pipe, "text_encoder") and pipe.text_encoder is not None:
+            pipe.text_encoder.eval()
+        if hasattr(pipe, "text_encoder_2") and pipe.text_encoder_2 is not None:
+            pipe.text_encoder_2.eval()
+        if hasattr(pipe, "controlnet") and pipe.controlnet is not None:
+            pipe.controlnet.eval()
+        if hasattr(pipe, "image_encoder") and pipe.image_encoder is not None:
+            pipe.image_encoder.eval()
+        if device == "cuda" and enable_cpu_offload:
+            if enable_sequential_offload:
+                pipe.enable_sequential_cpu_offload()
+            else:
+                pipe.enable_model_cpu_offload()
+        else:
+            pipe.to(device)
+
+        if enable_xformers:
+            try:
+                pipe.enable_xformers_memory_efficient_attention()
+            except (AttributeError, ImportError):
+                pass
 
     def generate(
         self,
@@ -143,6 +204,8 @@ class SdxlPanoramaI2I:
         control_image: Optional[Image.Image] = None,
         ip_adapter_images: Optional[Sequence[Image.Image]] = None,
     ) -> Image.Image:
+        self._last_prompt = prompt
+        self._last_negative_prompt = negative_prompt
         image_strip, target_size = build_strip_panorama(
             images, height=height, return_target_size=True
         )
@@ -176,11 +239,54 @@ class SdxlPanoramaI2I:
         }
         if ip_adapter_images:
             pipe_kwargs["ip_adapter_image"] = ip_adapter_images
-        result = self.pipe(**pipe_kwargs)
+        if self.refiner_pipe is not None:
+            self._maybe_swap_pipelines(self.pipe, self.refiner_pipe)
+        with torch.inference_mode():
+            result = self.pipe(**pipe_kwargs)
         output = result.images[0]
         if height is not None and output.size != target_size:
             output = output.resize(target_size, resample=Image.BICUBIC)
         return output
+
+    def refine_images(
+        self,
+        prompt: Optional[str],
+        negative_prompt: Optional[str],
+        images: Sequence[Image.Image],
+        strength: float,
+        num_inference_steps: int,
+        guidance_scale: float,
+        seed: Optional[int] = None,
+    ) -> List[Image.Image]:
+        if self.refiner_pipe is None:
+            return list(images)
+        if prompt is None:
+            prompt = self._last_prompt
+        if negative_prompt is None:
+            negative_prompt = self._last_negative_prompt
+        if prompt is None:
+            raise ValueError(
+                "Refiner prompt is missing; call generate() first or pass it."
+            )
+        self._maybe_swap_pipelines(self.refiner_pipe, self.pipe)
+        refined = []
+        for idx, image in enumerate(images):
+            generator = None
+            if seed is not None:
+                generator = torch.Generator(device=self.device).manual_seed(seed + idx)
+            with torch.inference_mode():
+                result = self.refiner_pipe(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    image=image,
+                    strength=strength,
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    generator=generator,
+                )
+            refined.append(result.images[0])
+        self._maybe_swap_pipelines(self.pipe, self.refiner_pipe)
+        return refined
 
 
 def _build_env_dataset(cfg, mode: str):
@@ -287,6 +393,7 @@ def sdxl_panorama_i2i(
 
     i2i = SdxlPanoramaI2I(
         model_id=i2i_cfg.model_id,
+        refiner_model_id=i2i_cfg.refiner_model_id,
         controlnet_ids=controlnet_ids,
         enable_cpu_offload=i2i_cfg.cpu_offload,
         enable_sequential_offload=i2i_cfg.sequential_offload,
@@ -319,7 +426,16 @@ def sdxl_panorama_i2i(
     blended_segments = _split_strip_by_widths(
         blended, widths=[img.width for img in [to_pil_rgb(img) for img in images]]
     )
-    return blended_segments
+    refined_segments = i2i.refine_images(
+        prompt=None,
+        negative_prompt=None,
+        images=blended_segments,
+        strength=i2i_cfg.refiner_strength,
+        num_inference_steps=i2i_cfg.steps,
+        guidance_scale=i2i_cfg.guidance_scale,
+        seed=i2i_cfg.seed,
+    )
+    return refined_segments
 
 
 def main():
