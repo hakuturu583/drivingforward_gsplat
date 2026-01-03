@@ -155,12 +155,29 @@ class SdxlPanoramaI2I:
         enable_sequential_offload: bool,
         enable_xformers: bool,
     ) -> None:
+        pipe.set_progress_bar_config(disable=True)
+        pipe.enable_attention_slicing()
+        try:
+            pipe.enable_vae_slicing()
+            pipe.enable_vae_tiling()
+        except AttributeError:
+            pass
+        pipe.unet.eval()
+        if hasattr(pipe, "vae") and pipe.vae is not None:
+            pipe.vae.eval()
+        if hasattr(pipe, "text_encoder") and pipe.text_encoder is not None:
+            pipe.text_encoder.eval()
+        if hasattr(pipe, "text_encoder_2") and pipe.text_encoder_2 is not None:
+            pipe.text_encoder_2.eval()
+        if hasattr(pipe, "controlnet") and pipe.controlnet is not None:
+            pipe.controlnet.eval()
+        if hasattr(pipe, "image_encoder") and pipe.image_encoder is not None:
+            pipe.image_encoder.eval()
         if device == "cuda" and enable_cpu_offload:
             if enable_sequential_offload:
                 pipe.enable_sequential_cpu_offload()
             else:
                 pipe.enable_model_cpu_offload()
-            pipe.enable_attention_slicing()
         else:
             pipe.to(device)
 
@@ -220,7 +237,8 @@ class SdxlPanoramaI2I:
             pipe_kwargs["ip_adapter_image"] = ip_adapter_images
         if self.refiner_pipe is not None:
             self._maybe_swap_pipelines(self.pipe, self.refiner_pipe)
-        result = self.pipe(**pipe_kwargs)
+        with torch.inference_mode():
+            result = self.pipe(**pipe_kwargs)
         output = result.images[0]
         if height is not None and output.size != target_size:
             output = output.resize(target_size, resample=Image.BICUBIC)
@@ -244,15 +262,16 @@ class SdxlPanoramaI2I:
             generator = None
             if seed is not None:
                 generator = torch.Generator(device=self.device).manual_seed(seed + idx)
-            result = self.refiner_pipe(
-                prompt=prompt,
-                negative_prompt=negative_prompt,
-                image=image,
-                strength=strength,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
-                generator=generator,
-            )
+            with torch.inference_mode():
+                result = self.refiner_pipe(
+                    prompt=prompt,
+                    negative_prompt=negative_prompt,
+                    image=image,
+                    strength=strength,
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    generator=generator,
+                )
             refined.append(result.images[0])
         self._maybe_swap_pipelines(self.pipe, self.refiner_pipe)
         return refined
