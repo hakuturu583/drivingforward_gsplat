@@ -375,8 +375,13 @@ def sdxl_panorama_i2i(
         else os.path.join(repo_root, i2i_cfg.prompt_config)
     )
     prompt_cfg = PromptConfig.from_yaml(prompt_path)
-    prompt = prompt_cfg.prompt
-    negative_prompt = prompt_cfg.negative_prompt
+    prompt = ", ".join(prompt_cfg.prompt)
+    negative_prompt = (
+        ", ".join(prompt_cfg.negative_prompt) if prompt_cfg.negative_prompt else None
+    )
+    print(f"SDXL prompt: {prompt}")
+    if negative_prompt:
+        print(f"SDXL negative prompt: {negative_prompt}")
     use_ip_adapter = bool(prompt_cfg.reference_images)
     if use_ip_adapter and not i2i_cfg.ip_adapter_model_id:
         raise ValueError(
