@@ -339,7 +339,14 @@ def get_adj_cams(cam):
 
 
 def pts2render(
-    inputs, outputs, cam_num, novel_cam, novel_frame_id, bg_color, mode="MF"
+    inputs,
+    outputs,
+    cam_num,
+    novel_cam,
+    novel_frame_id,
+    bg_color,
+    mode="MF",
+    with_postprocess: bool = True,
 ):
     bs, _, height, width = inputs[("color", 0, 0)][:, novel_cam, ...].shape
     render_novel_list = []
@@ -449,6 +456,7 @@ def pts2render(
             opacity=opacity_i,
             shs=sh_i,
             bg_color=bg_color,
+            with_postprocess=with_postprocess,
         )
         render_novel_list.append(render_novel_i.unsqueeze(0))
 
