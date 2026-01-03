@@ -1,0 +1,7 @@
+model_config: configs/nuscenes/main.yaml
+split: eval_MF
+index: 0
+torchscript_dir: torchscript
+novel_view_mode: MF
+output_path: output/gaussians
+cpu: false

@@ -1,8 +1,10 @@
 import argparse
 import os
 from datetime import datetime
+from dataclasses import dataclass
 import numpy as np
 import torch
+import yaml
 
 from drivingforward_gsplat.models.drivingforward_model import (
     DrivingForwardModel,
@@ -22,6 +24,34 @@ CAM_ORDER = [
     "CAM_BACK",
     "CAM_BACK_RIGHT",
 ]
+
+
+@dataclass
+class PredictGaussianConfig:
+    model_config: str = "configs/nuscenes/main.yaml"
+    split: str = "eval_MF"
+    index: int = 0
+    torchscript_dir: str = "torchscript"
+    novel_view_mode: str = "MF"
+    output_path: str = "output/gaussians"
+    cpu: bool = False
+
+    @classmethod
+    def from_yaml(cls, path: str) -> "PredictGaussianConfig":
+        with open(path, "r") as f:
+            data = yaml.safe_load(f) or {}
+        cpu_value = data.get("cpu", cls.cpu)
+        if isinstance(cpu_value, str):
+            cpu_value = cpu_value.strip().lower() in ("1", "true", "yes", "y")
+        return cls(
+            model_config=data.get("model_config", cls.model_config),
+            split=data.get("split", cls.split),
+            index=int(data.get("index", cls.index)),
+            torchscript_dir=data.get("torchscript_dir", cls.torchscript_dir),
+            novel_view_mode=data.get("novel_view_mode", cls.novel_view_mode),
+            output_path=data.get("output_path", cls.output_path),
+            cpu=bool(cpu_value),
+        )
 
 
 def _ensure_dir(path: str) -> None:
@@ -243,47 +273,20 @@ def main() -> None:
         description="Predict gaussian parameters from NuScenes images."
     )
     parser.add_argument(
-        "--config",
-        default="configs/nuscenes/main.yaml",
-        help="Config yaml file path.",
-    )
-    parser.add_argument(
-        "--split",
-        default="eval_MF",
-        help="NuScenes split name (train/eval_MF/eval_SF).",
-    )
-    parser.add_argument(
-        "--index",
-        type=int,
-        default=0,
-        help="Dataset index to load.",
-    )
-    parser.add_argument(
-        "--torchscript-dir",
-        default="torchscript",
-        help="Torchscript directory (relative or absolute).",
-    )
-    parser.add_argument(
-        "--novel-view-mode",
-        default="MF",
-        choices=("MF", "SF"),
-        help="Model variant for torchscript files.",
-    )
-    parser.add_argument(
-        "--output-path",
-        default="output/gaussians",
-        help="Output directory for gaussian ply files.",
-    )
-    parser.add_argument(
-        "--cpu",
-        action="store_true",
-        help="Force CPU inference.",
+        "--predict-config",
+        default="configs/predict_gaussian.yaml",
+        help="Predict gaussian config yaml file path.",
     )
     args = parser.parse_args()
+    predict_cfg = PredictGaussianConfig.from_yaml(args.predict_config)
 
     from drivingforward_gsplat.dataset import EnvNuScenesDataset, get_transforms
 
-    cfg = get_config(args.config, mode="eval", novel_view_mode=args.novel_view_mode)
+    cfg = get_config(
+        predict_cfg.model_config,
+        mode="eval",
+        novel_view_mode=predict_cfg.novel_view_mode,
+    )
     augmentation = {
         "image_shape": (int(cfg["training"]["height"]), int(cfg["training"]["width"])),
         "jittering": (0.0, 0.0, 0.0, 0.0),
@@ -291,7 +294,7 @@ def main() -> None:
         "crop_eval_borders": (),
     }
     dataset = EnvNuScenesDataset(
-        args.split,
+        predict_cfg.split,
         cameras=CAM_ORDER,
         back_context=cfg["data"]["back_context"],
         forward_context=cfg["data"]["forward_context"],
@@ -302,15 +305,15 @@ def main() -> None:
         with_mask=True,
     )
 
-    sample = dataset[args.index]
-    if args.cpu or not torch.cuda.is_available():
+    sample = dataset[predict_cfg.index]
+    if predict_cfg.cpu or not torch.cuda.is_available():
         raise RuntimeError("TorchScript DrivingForward inference requires CUDA.")
     device = torch.device("cuda")
 
-    token = sample.get("token", f"index_{args.index}")
+    token = sample.get("token", f"index_{predict_cfg.index}")
     inputs = _add_batch_dim_to_inputs(sample)
     inputs = _move_inputs_to_device(inputs, device)
-    model = GtPoseDrivingForwardModel(cfg, args.torchscript_dir, device)
+    model = GtPoseDrivingForwardModel(cfg, predict_cfg.torchscript_dir, device)
     model.set_eval()
     with torch.no_grad():
         outputs = model.estimate(inputs)
@@ -318,7 +321,7 @@ def main() -> None:
             model.gs_net = model.models["gs_net"]
             for cam in range(model.num_cams):
                 model.get_gaussian_data(inputs, outputs, cam)
-    output_dir = os.path.join(args.output_path, _timestamp_token(str(token)))
+    output_dir = os.path.join(predict_cfg.output_path, _timestamp_token(str(token)))
     _ensure_dir(output_dir)
     output_path = os.path.join(output_dir, "output.ply")
     output_inria_path = os.path.join(output_dir, "output_inria.ply")
