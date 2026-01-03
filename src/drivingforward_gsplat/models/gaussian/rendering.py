@@ -2,9 +2,13 @@ import inspect
 import locale
 import math
 import os
+import tempfile
+from pathlib import Path
 
+import numpy as np
 import torch
 from einops import rearrange
+from PIL import Image
 
 left_cam_dict = {2: 0, 0: 1, 4: 2, 1: 3, 5: 4, 3: 5}
 right_cam_dict = {0: 2, 1: 0, 2: 4, 3: 1, 4: 5, 5: 3}
@@ -81,6 +85,136 @@ def _ensure_utf8_locale():
             pass
 
 
+_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
+
+
+def _ensure_bchw(tensor: torch.Tensor) -> torch.Tensor:
+    if tensor.dim() == 3:
+        if tensor.shape[0] in (1, 3, 4):
+            return tensor.unsqueeze(0)
+        if tensor.shape[-1] in (1, 3, 4):
+            return tensor.permute(2, 0, 1).unsqueeze(0)
+    elif tensor.dim() == 4:
+        if tensor.shape[1] in (1, 3, 4):
+            return tensor
+        if tensor.shape[-1] in (1, 3, 4):
+            return tensor.permute(0, 3, 1, 2)
+    raise ValueError("Unsupported rendered tensor shape for Fixer postprocess.")
+
+
+def _tensor_to_uint8_image(tensor: torch.Tensor) -> Image.Image:
+    tensor = tensor.detach().cpu()
+    if torch.is_floating_point(tensor):
+        tensor = torch.nan_to_num(tensor, nan=0.0, posinf=1.0, neginf=0.0)
+        max_val = float(tensor.max()) if tensor.numel() else 0.0
+        if max_val <= 1.0:
+            tensor = tensor.clamp(0.0, 1.0) * 255.0
+        else:
+            tensor = tensor.clamp(0.0, 255.0)
+        tensor = tensor.to(torch.uint8)
+    else:
+        tensor = tensor.to(torch.uint8)
+
+    if tensor.dim() != 3:
+        raise ValueError("Expected a CHW tensor for image conversion.")
+
+    if tensor.shape[0] == 1:
+        tensor = tensor.repeat(3, 1, 1)
+    elif tensor.shape[0] >= 4:
+        tensor = tensor[:3]
+
+    array = tensor.permute(1, 2, 0).contiguous().numpy()
+    return Image.fromarray(array, mode="RGB")
+
+
+def _load_output_images(output_dir: Path, names: list[str]) -> list[Path]:
+    output_dir = Path(output_dir)
+    outputs: list[Path] = []
+    for name in names:
+        path = output_dir / name
+        if path.exists():
+            outputs.append(path)
+            continue
+        stem = Path(name).stem
+        matches = [
+            p for p in output_dir.glob(f"{stem}.*") if p.suffix.lower() in _IMAGE_EXTS
+        ]
+        if matches:
+            outputs.append(sorted(matches)[0])
+    if len(outputs) == len(names):
+        return outputs
+    fallback = sorted(
+        [
+            p
+            for p in output_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in _IMAGE_EXTS
+        ]
+    )
+    return fallback
+
+
+def postprocess_by_fixer(
+    rendered: torch.Tensor,
+    *,
+    dest_root: Path | None = None,
+    timestep: int = 250,
+    batch_size: int | None = None,
+    use_gpus: bool = True,
+    platform: str | None = None,
+) -> torch.Tensor:
+    from fixerpy.fixer import setup_and_infer
+
+    bchw = _ensure_bchw(rendered)
+    device = rendered.device
+    dtype = rendered.dtype
+
+    dest_root = (
+        Path(dest_root)
+        if dest_root is not None
+        else Path(os.environ.get("FIXER_WORK_DIR", ".fixer_work"))
+    )
+
+    with tempfile.TemporaryDirectory(prefix="fixer_postprocess_") as tmp_dir:
+        tmp_dir = Path(tmp_dir)
+        input_dir = tmp_dir / "input"
+        output_dir = tmp_dir / "output"
+        input_dir.mkdir(parents=True, exist_ok=True)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        names: list[str] = []
+        for idx, img in enumerate(bchw):
+            name = f"{idx:06d}.png"
+            _tensor_to_uint8_image(img).save(input_dir / name)
+            names.append(name)
+
+        setup_and_infer(
+            dest_root=dest_root,
+            input_dir=input_dir,
+            output_dir=output_dir,
+            timestep=timestep,
+            batch_size=batch_size or len(names),
+            use_gpus=use_gpus,
+            platform=platform,
+        )
+
+        output_paths = _load_output_images(output_dir, names)
+        if len(output_paths) < len(names):
+            raise FileNotFoundError("Fixer did not produce the expected output images.")
+
+        processed: list[torch.Tensor] = []
+        for path in output_paths[: len(names)]:
+            with Image.open(path) as img:
+                rgb = img.convert("RGB")
+                array = np.array(rgb, dtype=np.float32) / 255.0
+                tensor = torch.from_numpy(array).permute(2, 0, 1)
+                processed.append(tensor)
+
+        output = torch.stack(processed, dim=0).to(device=device, dtype=dtype)
+        if rendered.dim() == 3:
+            output = output.squeeze(0)
+        return output
+
+
 def render(
     novel_FovX,
     novel_FovY,
@@ -97,6 +231,7 @@ def render(
     opacity,
     shs,
     bg_color,
+    with_postprocess: bool = True,
 ):
     """Render with gsplat. Background tensor must be on the same device."""
     _ensure_utf8_locale()
@@ -191,6 +326,8 @@ def render(
         rendered = rendered.permute(0, 3, 1, 2)
         if rendered.size(0) == 1:
             rendered = rendered.squeeze(0)
+    if with_postprocess:
+        rendered = postprocess_by_fixer(rendered)
     return rendered
 
 
