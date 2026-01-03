@@ -98,6 +98,8 @@ class SdxlPanoramaI2I:
         self.device = device
         self.torch_dtype = torch_dtype
         self._cpu_offload_enabled = device == "cuda" and enable_cpu_offload
+        self._last_prompt: Optional[str] = None
+        self._last_negative_prompt: Optional[str] = None
 
         controlnet = [
             ControlNetModel.from_pretrained(controlnet_id, torch_dtype=torch_dtype)
@@ -202,6 +204,8 @@ class SdxlPanoramaI2I:
         control_image: Optional[Image.Image] = None,
         ip_adapter_images: Optional[Sequence[Image.Image]] = None,
     ) -> Image.Image:
+        self._last_prompt = prompt
+        self._last_negative_prompt = negative_prompt
         image_strip, target_size = build_strip_panorama(
             images, height=height, return_target_size=True
         )
@@ -246,7 +250,7 @@ class SdxlPanoramaI2I:
 
     def refine_images(
         self,
-        prompt: str,
+        prompt: Optional[str],
         negative_prompt: Optional[str],
         images: Sequence[Image.Image],
         strength: float,
@@ -256,6 +260,14 @@ class SdxlPanoramaI2I:
     ) -> List[Image.Image]:
         if self.refiner_pipe is None:
             return list(images)
+        if prompt is None:
+            prompt = self._last_prompt
+        if negative_prompt is None:
+            negative_prompt = self._last_negative_prompt
+        if prompt is None:
+            raise ValueError(
+                "Refiner prompt is missing; call generate() first or pass it."
+            )
         self._maybe_swap_pipelines(self.refiner_pipe, self.pipe)
         refined = []
         for idx, image in enumerate(images):
@@ -415,8 +427,8 @@ def sdxl_panorama_i2i(
         blended, widths=[img.width for img in [to_pil_rgb(img) for img in images]]
     )
     refined_segments = i2i.refine_images(
-        prompt=prompt,
-        negative_prompt=negative_prompt,
+        prompt=None,
+        negative_prompt=None,
         images=blended_segments,
         strength=i2i_cfg.refiner_strength,
         num_inference_steps=i2i_cfg.steps,
