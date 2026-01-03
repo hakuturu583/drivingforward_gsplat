@@ -5,3 +5,5 @@ torchscript_dir: torchscript
 novel_view_mode: MF
 output_path: output/gaussians
 cpu: false
+sdxl_panorama_i2i_config: configs/sdxl_panorama_i2i.yaml
+sdxl_panorama_prompt_config: null

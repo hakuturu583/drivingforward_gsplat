@@ -2,6 +2,7 @@ import argparse
 import os
 from datetime import datetime
 from dataclasses import dataclass
+from typing import Optional
 import numpy as np
 import torch
 import yaml
@@ -35,6 +36,8 @@ class PredictGaussianConfig:
     novel_view_mode: str = "MF"
     output_path: str = "output/gaussians"
     cpu: bool = False
+    sdxl_panorama_i2i_config: Optional[str] = "configs/sdxl_panorama_i2i.yaml"
+    sdxl_panorama_prompt_config: Optional[str] = None
 
     @classmethod
     def from_yaml(cls, path: str) -> "PredictGaussianConfig":
@@ -51,6 +54,12 @@ class PredictGaussianConfig:
             novel_view_mode=data.get("novel_view_mode", cls.novel_view_mode),
             output_path=data.get("output_path", cls.output_path),
             cpu=bool(cpu_value),
+            sdxl_panorama_i2i_config=data.get(
+                "sdxl_panorama_i2i_config", cls.sdxl_panorama_i2i_config
+            ),
+            sdxl_panorama_prompt_config=data.get(
+                "sdxl_panorama_prompt_config", cls.sdxl_panorama_prompt_config
+            ),
         )
 
 
@@ -111,6 +120,52 @@ def _move_inputs_to_device(inputs: dict, device: torch.device) -> dict:
         else:
             inputs[key] = value
     return inputs
+
+
+def _resolve_path(path: Optional[str]) -> Optional[str]:
+    if not path:
+        return None
+    if os.path.isabs(path):
+        return path
+    return os.path.join(os.getcwd(), path)
+
+
+def _apply_sdxl_panorama_i2i(predict_cfg: PredictGaussianConfig, sample: dict) -> dict:
+    from PIL import Image
+    import torchvision.transforms as transforms
+
+    from drivingforward_gsplat.i2i.sdxl_panorama_i2i import sdxl_panorama_i2i
+    from drivingforward_gsplat.i2i.sdxl_panorama_i2i_config import (
+        SdxlPanoramaI2IConfig,
+    )
+
+    cfg_path = _resolve_path(predict_cfg.sdxl_panorama_i2i_config)
+    if cfg_path is None:
+        raise ValueError("sdxl_panorama_i2i_config is required.")
+    i2i_cfg = SdxlPanoramaI2IConfig.from_yaml(cfg_path)
+    if predict_cfg.sdxl_panorama_prompt_config:
+        i2i_cfg.prompt_config = predict_cfg.sdxl_panorama_prompt_config
+    i2i_cfg.prompt_config = _resolve_path(i2i_cfg.prompt_config)
+    if i2i_cfg.prompt_config is None:
+        return sample
+    images = [sample[("color", 0, 0)][idx] for idx in range(len(CAM_ORDER))]
+    generated_images = sdxl_panorama_i2i(i2i_cfg, images)
+    target = sample[("color", 0, 0)]
+    target_height, target_width = target.shape[-2], target.shape[-1]
+    to_tensor = transforms.ToTensor()
+    converted = []
+    for image in generated_images:
+        if image.size != (target_width, target_height):
+            image = image.resize((target_width, target_height), resample=Image.BICUBIC)
+        converted.append(to_tensor(image).type_as(target))
+    if len(converted) != target.shape[0]:
+        raise ValueError(
+            f"Expected {target.shape[0]} i2i images, got {len(converted)}."
+        )
+    stacked = torch.stack(converted, dim=0)
+    sample[("color", 0, 0)] = stacked
+    sample[("color_aug", 0, 0)] = stacked.clone()
+    return sample
 
 
 class TorchScriptDepthNet(torch.nn.Module):
@@ -277,8 +332,15 @@ def main() -> None:
         default="configs/predict_gaussian.yaml",
         help="Predict gaussian config yaml file path.",
     )
+    parser.add_argument(
+        "--sdxl-panorama-prompt-config",
+        default=None,
+        help="SDXL panorama prompt yaml file path. When set, i2i is applied.",
+    )
     args = parser.parse_args()
     predict_cfg = PredictGaussianConfig.from_yaml(args.predict_config)
+    if args.sdxl_panorama_prompt_config:
+        predict_cfg.sdxl_panorama_prompt_config = args.sdxl_panorama_prompt_config
 
     from drivingforward_gsplat.dataset import EnvNuScenesDataset, get_transforms
 
@@ -306,6 +368,8 @@ def main() -> None:
     )
 
     sample = dataset[predict_cfg.index]
+    if predict_cfg.sdxl_panorama_prompt_config:
+        sample = _apply_sdxl_panorama_i2i(predict_cfg, sample)
     if predict_cfg.cpu or not torch.cuda.is_available():
         raise RuntimeError("TorchScript DrivingForward inference requires CUDA.")
     device = torch.device("cuda")
