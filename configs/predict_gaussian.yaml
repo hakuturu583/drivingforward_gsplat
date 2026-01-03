@@ -1,8 +1,8 @@
 model_config: configs/nuscenes/main.yaml
-split: eval_MF
+split: eval_SF
 index: 0
 torchscript_dir: torchscript
-novel_view_mode: MF
+novel_view_mode: SF
 output_path: output/gaussians
 cpu: false
 sdxl_panorama_i2i_config: configs/sdxl_panorama_i2i.yaml

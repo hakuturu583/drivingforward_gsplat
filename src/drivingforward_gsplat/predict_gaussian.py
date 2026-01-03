@@ -16,6 +16,7 @@ from drivingforward_gsplat.utils.gaussian_ply import (
     save_gaussians_as_ply,
 )
 from drivingforward_gsplat.utils.misc import get_config
+from drivingforward_gsplat.utils.misc import to_pil_rgb
 
 CAM_ORDER = [
     "CAM_FRONT_RIGHT",
@@ -72,6 +73,17 @@ def _timestamp_token(token: str) -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     token_safe = str(token).replace("/", "_").replace(os.sep, "_")
     return f"{timestamp}_{token_safe}"
+
+
+def _save_debug_images(sample: dict, output_root: str, output_token: str) -> None:
+    if ("color", 0, 0) not in sample:
+        return
+    output_dir = os.path.join(output_root, output_token)
+    _ensure_dir(output_dir)
+    images = sample[("color", 0, 0)]
+    for cam_name, cam_idx in zip(CAM_ORDER, range(len(CAM_ORDER))):
+        image = to_pil_rgb(images[cam_idx])
+        image.save(os.path.join(output_dir, f"{cam_name}.png"))
 
 
 def _to_tensor(value):
@@ -148,23 +160,33 @@ def _apply_sdxl_panorama_i2i(predict_cfg: PredictGaussianConfig, sample: dict) -
     i2i_cfg.prompt_config = _resolve_path(i2i_cfg.prompt_config)
     if i2i_cfg.prompt_config is None:
         return sample
-    images = [sample[("color", 0, 0)][idx] for idx in range(len(CAM_ORDER))]
-    generated_images = sdxl_panorama_i2i(i2i_cfg, images)
-    target = sample[("color", 0, 0)]
-    target_height, target_width = target.shape[-2], target.shape[-1]
+    if predict_cfg.novel_view_mode == "SF":
+        desired_frame_ids = [0]
+    else:
+        desired_frame_ids = [0, -1, 1]
+    frame_ids = [
+        frame_id for frame_id in desired_frame_ids if ("color", frame_id, 0) in sample
+    ]
     to_tensor = transforms.ToTensor()
-    converted = []
-    for image in generated_images:
-        if image.size != (target_width, target_height):
-            image = image.resize((target_width, target_height), resample=Image.BICUBIC)
-        converted.append(to_tensor(image).type_as(target))
-    if len(converted) != target.shape[0]:
-        raise ValueError(
-            f"Expected {target.shape[0]} i2i images, got {len(converted)}."
-        )
-    stacked = torch.stack(converted, dim=0)
-    sample[("color", 0, 0)] = stacked
-    sample[("color_aug", 0, 0)] = stacked.clone()
+    for frame_id in frame_ids:
+        target = sample[("color", frame_id, 0)]
+        target_height, target_width = target.shape[-2], target.shape[-1]
+        images = [target[idx] for idx in range(len(CAM_ORDER))]
+        generated_images = sdxl_panorama_i2i(i2i_cfg, images)
+        converted = []
+        for image in generated_images:
+            if image.size != (target_width, target_height):
+                image = image.resize(
+                    (target_width, target_height), resample=Image.BICUBIC
+                )
+            converted.append(to_tensor(image).type_as(target))
+        if len(converted) != target.shape[0]:
+            raise ValueError(
+                f"Expected {target.shape[0]} i2i images, got {len(converted)}."
+            )
+        stacked = torch.stack(converted, dim=0)
+        sample[("color", frame_id, 0)] = stacked
+        sample[("color_aug", frame_id, 0)] = stacked.clone()
     return sample
 
 
@@ -375,6 +397,8 @@ def main() -> None:
     device = torch.device("cuda")
 
     token = sample.get("token", f"index_{predict_cfg.index}")
+    output_token = _timestamp_token(str(token))
+    _save_debug_images(sample, "output/images", output_token)
     inputs = _add_batch_dim_to_inputs(sample)
     inputs = _move_inputs_to_device(inputs, device)
     model = GtPoseDrivingForwardModel(cfg, predict_cfg.torchscript_dir, device)
@@ -385,7 +409,7 @@ def main() -> None:
             model.gs_net = model.models["gs_net"]
             for cam in range(model.num_cams):
                 model.get_gaussian_data(inputs, outputs, cam)
-    output_dir = os.path.join(predict_cfg.output_path, _timestamp_token(str(token)))
+    output_dir = os.path.join(predict_cfg.output_path, output_token)
     _ensure_dir(output_dir)
     output_path = os.path.join(output_dir, "output.ply")
     output_inria_path = os.path.join(output_dir, "output_inria.ply")
