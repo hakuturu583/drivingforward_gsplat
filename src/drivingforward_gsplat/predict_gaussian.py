@@ -1,7 +1,9 @@
 import argparse
 import os
+import shutil
 from datetime import datetime
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 import numpy as np
 import torch
@@ -16,12 +18,15 @@ from drivingforward_gsplat.utils.gaussian_ply import (
     save_gaussians_as_ply,
 )
 from drivingforward_gsplat.models.gaussian import (
+    depth2pc,
     focal2fov,
     getProjectionMatrix,
     pts2render,
+    rotate_sh,
 )
 from drivingforward_gsplat.utils.misc import get_config
 from drivingforward_gsplat.utils.misc import to_pil_rgb
+from einops import rearrange
 
 CAM_ORDER = [
     "CAM_FRONT_RIGHT",
@@ -31,6 +36,7 @@ CAM_ORDER = [
     "CAM_BACK",
     "CAM_BACK_RIGHT",
 ]
+_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
 
 
 @dataclass
@@ -163,11 +169,17 @@ def _save_rendered_images(
     zfar: float,
 ) -> None:
     output_dir = os.path.join(output_root, output_token)
+    output_dir_path = Path(output_dir)
     _ensure_dir(output_dir)
     frame_id = 0
+    rendered_raw_list = []
+    fixer_input_dir = output_dir_path / "fixer_input"
+    fixer_output_dir = output_dir_path / "fixer_output"
+    fixer_input_dir.mkdir(parents=True, exist_ok=True)
+    fixer_output_dir.mkdir(parents=True, exist_ok=True)
     for cam_name, cam in zip(CAM_ORDER, range(cam_num)):
         _ensure_render_params(outputs, inputs, cam, frame_id, zfar=zfar, znear=0.01)
-        rendered = pts2render(
+        rendered_raw = pts2render(
             inputs=inputs,
             outputs=outputs,
             cam_num=cam_num,
@@ -175,9 +187,47 @@ def _save_rendered_images(
             novel_frame_id=frame_id,
             bg_color=[1.0, 1.0, 1.0],
             mode=novel_view_mode,
+            with_postprocess=False,
         )
-        image = to_pil_rgb(rendered[0])
-        image.save(os.path.join(output_dir, f"{cam_name}_render.png"))
+        rendered_raw_list.append(rendered_raw)
+
+    if not rendered_raw_list:
+        return
+
+    for cam_name, rendered_raw in zip(CAM_ORDER, rendered_raw_list):
+        raw_image = to_pil_rgb(rendered_raw[0])
+        raw_image.save(os.path.join(output_dir, f"{cam_name}_render_raw.png"))
+        raw_image.save(fixer_input_dir / f"{cam_name}_render_raw.png")
+
+    from fixerpy.fixer import setup_and_infer
+
+    dest_root = Path(os.environ.get("FIXER_WORK_DIR", ".fixer_work"))
+    setup_and_infer(
+        dest_root=dest_root,
+        input_dir=fixer_input_dir,
+        output_dir=fixer_output_dir,
+        timestep=250,
+        batch_size=1,
+        use_gpus=True,
+        platform=None,
+    )
+
+    for cam_name in CAM_ORDER:
+        expected_name = f"{cam_name}_render_raw.png"
+        output_path = fixer_output_dir / expected_name
+        if not output_path.exists():
+            stem = Path(expected_name).stem
+            matches = [
+                p
+                for p in fixer_output_dir.glob(f"{stem}.*")
+                if p.suffix.lower() in _IMAGE_EXTS
+            ]
+            if not matches:
+                raise FileNotFoundError(
+                    f"Fixer output missing for {cam_name} in {fixer_output_dir}"
+                )
+            output_path = sorted(matches)[0]
+        shutil.copyfile(output_path, output_dir_path / f"{cam_name}_render.png")
 
 
 def _to_tensor(value):
@@ -226,6 +276,44 @@ def _move_inputs_to_device(inputs: dict, device: torch.device) -> dict:
         else:
             inputs[key] = value
     return inputs
+
+
+def _generate_context_gaussians_mf(
+    model: DrivingForwardModel, inputs: dict, outputs: dict, cam: int
+) -> None:
+    bs, _, _, _ = inputs[("color", 0, 0)][:, cam, ...].shape
+    for frame_id in (-1, 1):
+        if ("color", frame_id, 0) not in inputs:
+            raise KeyError(f"Missing frame_id {frame_id} for MF gaussian generation.")
+        outputs[("cam", cam)][("e2c_extr", frame_id, 0)] = torch.matmul(
+            outputs[("cam", cam)][("cam_T_cam", 0, frame_id)],
+            inputs["extrinsics_inv"][:, cam, ...],
+        )
+        outputs[("cam", cam)][("c2e_extr", frame_id, 0)] = torch.matmul(
+            inputs["extrinsics"][:, cam, ...],
+            torch.inverse(outputs[("cam", cam)][("cam_T_cam", 0, frame_id)]),
+        )
+        outputs[("cam", cam)][("xyz", frame_id, 0)] = depth2pc(
+            outputs[("cam", cam)][("depth", frame_id, 0)],
+            outputs[("cam", cam)][("e2c_extr", frame_id, 0)],
+            inputs[("K", 0)][:, cam, ...],
+        )
+        valid = outputs[("cam", cam)][("depth", frame_id, 0)] != 0.0
+        outputs[("cam", cam)][("pts_valid", frame_id, 0)] = valid.view(bs, -1)
+        rot_maps, scale_maps, opacity_maps, sh_maps = model.gs_net(
+            inputs[("color", frame_id, 0)][:, cam, ...],
+            outputs[("cam", cam)][("depth", frame_id, 0)],
+            outputs[("cam", cam)][("img_feat", frame_id, 0)],
+        )
+        c2w_rotations = rearrange(
+            outputs[("cam", cam)][("c2e_extr", frame_id, 0)][..., :3, :3],
+            "k i j -> k () () () i j",
+        )
+        sh_maps = rotate_sh(sh_maps, c2w_rotations[..., None, :, :])
+        outputs[("cam", cam)][("rot_maps", frame_id, 0)] = rot_maps
+        outputs[("cam", cam)][("scale_maps", frame_id, 0)] = scale_maps
+        outputs[("cam", cam)][("opacity_maps", frame_id, 0)] = opacity_maps
+        outputs[("cam", cam)][("sh_maps", frame_id, 0)] = sh_maps
 
 
 def _resolve_path(path: Optional[str]) -> Optional[str]:
@@ -508,7 +596,10 @@ def main() -> None:
         if getattr(model, "gaussian", False):
             model.gs_net = model.models["gs_net"]
             for cam in range(model.num_cams):
-                model.get_gaussian_data(inputs, outputs, cam)
+                if model.novel_view_mode == "MF":
+                    _generate_context_gaussians_mf(model, inputs, outputs, cam)
+                else:
+                    model.get_gaussian_data(inputs, outputs, cam)
             _save_rendered_images(
                 outputs,
                 inputs,
