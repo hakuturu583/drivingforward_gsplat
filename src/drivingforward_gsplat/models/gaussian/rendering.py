@@ -10,6 +10,8 @@ import torch
 from einops import rearrange
 from PIL import Image
 
+from drivingforward_gsplat.utils.misc import tensor_to_numpy_uint8
+
 left_cam_dict = {2: 0, 0: 1, 4: 2, 1: 3, 5: 4, 3: 5}
 right_cam_dict = {0: 2, 1: 0, 2: 4, 3: 1, 4: 5, 5: 3}
 
@@ -104,17 +106,6 @@ def _ensure_bchw(tensor: torch.Tensor) -> torch.Tensor:
 
 def _tensor_to_uint8_image(tensor: torch.Tensor) -> Image.Image:
     tensor = tensor.detach().cpu()
-    if torch.is_floating_point(tensor):
-        tensor = torch.nan_to_num(tensor, nan=0.0, posinf=1.0, neginf=0.0)
-        max_val = float(tensor.max()) if tensor.numel() else 0.0
-        if max_val <= 1.0:
-            tensor = tensor.clamp(0.0, 1.0) * 255.0
-        else:
-            tensor = tensor.clamp(0.0, 255.0)
-        tensor = tensor.to(torch.uint8)
-    else:
-        tensor = tensor.to(torch.uint8)
-
     if tensor.dim() != 3:
         raise ValueError("Expected a CHW tensor for image conversion.")
 
@@ -123,7 +114,7 @@ def _tensor_to_uint8_image(tensor: torch.Tensor) -> Image.Image:
     elif tensor.shape[0] >= 4:
         tensor = tensor[:3]
 
-    array = tensor.permute(1, 2, 0).contiguous().numpy()
+    array = tensor_to_numpy_uint8(tensor)
     return Image.fromarray(array, mode="RGB")
 
 

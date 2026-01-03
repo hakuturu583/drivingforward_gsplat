@@ -1,7 +1,9 @@
 import argparse
 import os
+import shutil
 from datetime import datetime
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 import numpy as np
 import torch
@@ -19,7 +21,6 @@ from drivingforward_gsplat.models.gaussian import (
     depth2pc,
     focal2fov,
     getProjectionMatrix,
-    postprocess_by_fixer,
     pts2render,
     rotate_sh,
 )
@@ -35,6 +36,7 @@ CAM_ORDER = [
     "CAM_BACK",
     "CAM_BACK_RIGHT",
 ]
+_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
 
 
 @dataclass
@@ -167,9 +169,14 @@ def _save_rendered_images(
     zfar: float,
 ) -> None:
     output_dir = os.path.join(output_root, output_token)
+    output_dir_path = Path(output_dir)
     _ensure_dir(output_dir)
     frame_id = 0
     rendered_raw_list = []
+    fixer_input_dir = output_dir_path / "fixer_input"
+    fixer_output_dir = output_dir_path / "fixer_output"
+    fixer_input_dir.mkdir(parents=True, exist_ok=True)
+    fixer_output_dir.mkdir(parents=True, exist_ok=True)
     for cam_name, cam in zip(CAM_ORDER, range(cam_num)):
         _ensure_render_params(outputs, inputs, cam, frame_id, zfar=zfar, znear=0.01)
         rendered_raw = pts2render(
@@ -187,15 +194,40 @@ def _save_rendered_images(
     if not rendered_raw_list:
         return
 
-    rendered_raw_all = torch.cat(rendered_raw_list, dim=0)
     for cam_name, rendered_raw in zip(CAM_ORDER, rendered_raw_list):
         raw_image = to_pil_rgb(rendered_raw[0])
         raw_image.save(os.path.join(output_dir, f"{cam_name}_render_raw.png"))
+        raw_image.save(fixer_input_dir / f"{cam_name}_render_raw.png")
 
-    rendered = postprocess_by_fixer(rendered_raw_all)
-    for cam_name, rendered_cam in zip(CAM_ORDER, rendered):
-        image = to_pil_rgb(rendered_cam)
-        image.save(os.path.join(output_dir, f"{cam_name}_render.png"))
+    from fixerpy.fixer import setup_and_infer
+
+    dest_root = Path(os.environ.get("FIXER_WORK_DIR", ".fixer_work"))
+    setup_and_infer(
+        dest_root=dest_root,
+        input_dir=fixer_input_dir,
+        output_dir=fixer_output_dir,
+        timestep=250,
+        batch_size=1,
+        use_gpus=True,
+        platform=None,
+    )
+
+    for cam_name in CAM_ORDER:
+        expected_name = f"{cam_name}_render_raw.png"
+        output_path = fixer_output_dir / expected_name
+        if not output_path.exists():
+            stem = Path(expected_name).stem
+            matches = [
+                p
+                for p in fixer_output_dir.glob(f"{stem}.*")
+                if p.suffix.lower() in _IMAGE_EXTS
+            ]
+            if not matches:
+                raise FileNotFoundError(
+                    f"Fixer output missing for {cam_name} in {fixer_output_dir}"
+                )
+            output_path = sorted(matches)[0]
+        shutil.copyfile(output_path, output_dir_path / f"{cam_name}_render.png")
 
 
 def _to_tensor(value):
