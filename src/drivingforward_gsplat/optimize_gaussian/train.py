@@ -260,10 +260,9 @@ def _make_jittered_views(
     return jittered
 
 
-def _save_debug_snapshot(
+def _save_debug_image(
     cfg: OptimizeGaussianConfig,
-    phase_name: str,
-    phase_step: int,
+    base_name: str,
     view: Dict,
     means: torch.Tensor,
     rotations: torch.Tensor,
@@ -273,7 +272,6 @@ def _save_debug_snapshot(
 ) -> None:
     debug_root = os.path.join(cfg.output_dir, cfg.debug_dir_name)
     os.makedirs(debug_root, exist_ok=True)
-    base_name = f"step_{phase_step:04d}"
 
     rendered = gs_render.render(
         novel_FovX=0.0,
@@ -296,6 +294,18 @@ def _save_debug_snapshot(
     image_path = os.path.join(debug_root, f"{base_name}.png")
     to_pil_rgb(rendered).save(image_path)
 
+
+def _save_debug_ply(
+    cfg: OptimizeGaussianConfig,
+    base_name: str,
+    means: torch.Tensor,
+    rotations: torch.Tensor,
+    scales: torch.Tensor,
+    opacities: torch.Tensor,
+    shs: torch.Tensor,
+) -> None:
+    debug_root = os.path.join(cfg.output_dir, cfg.debug_dir_name)
+    os.makedirs(debug_root, exist_ok=True)
     inria_path = os.path.join(debug_root, f"{base_name}.ply")
     save_gaussians_tensors_as_inria_ply(
         means.detach().cpu(),
@@ -379,16 +389,18 @@ def optimize_gaussians(
     )
 
     if raw_views:
-        _save_debug_snapshot(
+        _save_debug_image(
             cfg,
-            "init",
-            0,
+            "step_0000_cam0",
             raw_views[0],
             means,
             rotations,
             scales,
             opacities,
             shs,
+        )
+        _save_debug_ply(
+            cfg, "step_0000", means, rotations, scales, opacities, shs
         )
         print("[optimize] saved debug snapshot for phase=init step=0")
 
@@ -641,18 +653,34 @@ def optimize_gaussians(
                     f"[optimize] merged at step={global_step} gaussians={means.shape[0]}"
                 )
 
+        if raw_subset:
+            views_by_cam: Dict[int, Dict] = {}
+            for view in raw_subset:
+                cam_idx = int(view["cam_idx"])
+                if cam_idx not in views_by_cam:
+                    views_by_cam[cam_idx] = view
+            for cam_idx, view in views_by_cam.items():
+                _save_debug_image(
+                    cfg,
+                    f"step_{global_step:04d}_cam{cam_idx}",
+                    view,
+                    means,
+                    rotations,
+                    scales,
+                    opacities,
+                    shs,
+                )
         if last_view is not None:
-            _save_debug_snapshot(
+            _save_debug_ply(
                 cfg,
-                phase_id,
-                global_step,
-                last_view,
+                f"step_{global_step:04d}",
                 means,
                 rotations,
                 scales,
                 opacities,
                 shs,
             )
+        if raw_subset or last_view is not None:
             print(
                 f"[optimize] saved debug snapshot for phase={phase_id} "
                 f"step={global_step}"
