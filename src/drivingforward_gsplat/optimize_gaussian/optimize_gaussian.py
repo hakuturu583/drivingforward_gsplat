@@ -12,11 +12,8 @@ from PIL import Image
 from plyfile import PlyData
 
 from drivingforward_gsplat.predict_gaussian import CAM_ORDER
-from drivingforward_gsplat.optimize_gaussian.train import (
-    OptimizeGaussianConfig,
-    erode_mask,
-    optimize_gaussians,
-)
+from drivingforward_gsplat.optimize_gaussian.dataclass import OptimizeGaussianConfig
+from drivingforward_gsplat.optimize_gaussian.train import erode_mask, optimize_gaussians
 from drivingforward_gsplat.utils.gaussian_ply import save_gaussians_tensors_as_inria_ply
 
 

@@ -9,9 +9,6 @@ phase2_steps: 1000
 phase3_steps: 1000
 phase1_cam_count: 2
 phase2_cam_count: 4
-phase1_jitter_cm: 1.0
-phase2_jitter_cm: 3.0
-phase3_jitter_cm: 5.0
 jitter_views_per_cam: 4
 fixer_ratio: 0.33
 danger_percentile: 0.25
@@ -29,16 +26,19 @@ phase_settings:
       weight: 1.0
     fixer_loss:
       weight: 0.0
+    jitter_cm: 1.0
   phase2:
     photometric_loss:
       weight: 1.0
     fixer_loss:
       weight: 0.02
+    jitter_cm: 3.0
   phase3:
     photometric_loss:
       weight: 1.0
     fixer_loss:
       weight: 0.02
+    jitter_cm: 5.0
 merge_every: 200
 merge_voxel_size: 0.05
 merge_small_scale: 0.02
