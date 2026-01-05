@@ -69,35 +69,35 @@ def cutout_with_sam3(
 
     processor, model = _load_sam3_components(cfg.model_id, cfg.device, cfg.dtype)
     device = _resolve_device(cfg.device)
-    inputs = processor(images=pil_image, text=prompt, return_tensors="pt")
+    images = [pil_image]
+    if prompt:
+        inputs = processor(images=images, text=[prompt], return_tensors="pt")
+    else:
+        inputs = processor(images=images, return_tensors="pt")
     inputs = {key: value.to(device) for key, value in inputs.items()}
 
     with torch.no_grad():
         outputs = model(**inputs)
 
-    mask_logits = (
-        getattr(outputs, "pred_masks", None)
-        or getattr(outputs, "masks", None)
-        or getattr(outputs, "mask_logits", None)
+    results = processor.post_process_instance_segmentation(
+        outputs,
+        threshold=cfg.mask_threshold,
+        mask_threshold=cfg.mask_threshold,
+        target_sizes=inputs.get("original_sizes").tolist(),
     )
-    if mask_logits is None:
-        raise RuntimeError("SAM3 output does not contain masks.")
-
-    if mask_logits.ndim == 4:
-        masks = mask_logits[0]
+    if not results:
+        raise RuntimeError("SAM3 did not return any segmentation result.")
+    result = results[0]
+    masks = result.get("masks")
+    if masks is None or masks.numel() == 0:
+        mask = torch.zeros(pil_image.size[1], pil_image.size[0], dtype=torch.bool)
     else:
-        masks = mask_logits
-
-    iou_scores = getattr(outputs, "iou_scores", None)
-    if iou_scores is not None:
-        best_idx = int(torch.argmax(iou_scores[0]).item())
-        mask = masks[best_idx]
-    else:
-        mask = masks[0]
-
-    if mask.max() > 1.0 or mask.min() < 0.0:
-        mask = torch.sigmoid(mask)
-    mask = (mask >= cfg.mask_threshold).float()
+        scores = result.get("scores")
+        if scores is not None and scores.numel() > 0:
+            best_idx = int(torch.argmax(scores).item())
+        else:
+            best_idx = 0
+        mask = masks[best_idx] > 0.5
 
     mask_np = (mask.detach().cpu().numpy() * 255.0).astype(np.uint8)
     mask_pil = Image.fromarray(mask_np, mode="L")
