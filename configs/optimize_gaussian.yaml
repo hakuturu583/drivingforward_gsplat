@@ -15,7 +15,7 @@ phase_settings:
     sigma_min: 0.03
   phase1:
     steps: 1000
-    cam_count: 2
+    cam_count: 6
     jitter_views_per_cam: 4
     photometric_loss:
       weight: 1.0
@@ -28,7 +28,7 @@ phase_settings:
     jitter_cm: 1.0
   phase2:
     steps: 1000
-    cam_count: 4
+    cam_count: 6
     jitter_views_per_cam: 4
     photometric_loss:
       weight: 1.0
