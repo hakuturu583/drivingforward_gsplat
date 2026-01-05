@@ -129,6 +129,7 @@ def _resolve_phase_loss(
         "fixer_lpips_net": "vgg",
         "lambda_sigma": 0.1,
         "min_scale": 0.03,
+        "opacity_sparsity_weight": 0.0,
         "danger_percentile": 0.25,
         "blur_sigma": 1.5,
         "gamma": 5.0,
@@ -163,6 +164,10 @@ def _resolve_phase_loss(
             base["lambda_sigma"] = float(phase_cfg.minscale_loss.weight)
             base["min_scale"] = _apply_optional(
                 phase_cfg.minscale_loss.min_scale, base["min_scale"]
+            )
+        if phase_cfg.opacity_sparsity_loss is not None and phase_id == "phase0":
+            base["opacity_sparsity_weight"] = float(
+                phase_cfg.opacity_sparsity_loss.weight
             )
         base["jitter_cm"] = _apply_optional(phase_cfg.jitter_cm, base["jitter_cm"])
     return base
@@ -407,6 +412,7 @@ def optimize_gaussians(
         lambda_raw = float(phase_loss_cfg["photometric_loss_weight"])
         lambda_fix = float(phase_loss_cfg["fixer_loss_weight"])
         lambda_sigma = float(phase_loss_cfg["lambda_sigma"])
+        opacity_sparsity_weight = float(phase_loss_cfg["opacity_sparsity_weight"])
         jitter_cm = float(phase_loss_cfg.get("jitter_cm", 0.0))
         jitter_views_per_cam = int(runtime["jitter_views_per_cam"])
         fixer_loss.set_config(
@@ -486,6 +492,10 @@ def optimize_gaussians(
                     sigma_loss = sigma_loss[fg_mask].mean()
                     loss_sigma_val = lambda_sigma * sigma_loss
                     loss = loss + loss_sigma_val
+
+            if opacity_sparsity_weight > 0:
+                sparsity_loss = opacities.mean()
+                loss = loss + opacity_sparsity_weight * sparsity_loss
 
             for opt in optimizers.values():
                 opt.zero_grad(set_to_none=True)
