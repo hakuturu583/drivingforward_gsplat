@@ -31,7 +31,7 @@ sky_erode_kernel: 3
 sky_erode_iter: 1
 sam3_prompt: sky
 sam3_invert: true
-sam3_model_id: facebook/sam3-huge
+sam3_model_id: facebook/sam3
 sam3_device: cuda
 sam3_dtype: auto
 sam3_mask_threshold: 0.5
