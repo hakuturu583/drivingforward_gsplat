@@ -41,6 +41,11 @@ class OpacitySparsityLossConfig(LossConfig):
 
 
 @dataclass
+class ScaleRatioLossConfig(LossConfig):
+    max_ratio: Optional[float] = None
+
+
+@dataclass
 class SkyMaskConfig:
     erode_kernel: int = 3
     erode_iter: int = 1
@@ -99,6 +104,7 @@ class PhaseConfig:
     fixer_loss: Optional[FixerLossConfig] = None
     minscale_loss: Optional[MinScaleLossConfig] = None
     opacity_sparsity_loss: Optional[OpacitySparsityLossConfig] = None
+    scale_ratio_loss: Optional[ScaleRatioLossConfig] = None
     steps: Optional[int] = None
     cam_count: Optional[int] = None
     jitter_views_per_cam: Optional[int] = None
@@ -119,6 +125,7 @@ class PhaseConfig:
         fixer = data.get("fixer_loss")
         minscale = data.get("minscale_loss")
         opacity_sparsity = data.get("opacity_sparsity_loss")
+        scale_ratio = data.get("scale_ratio_loss")
         return cls(
             photometric_loss=PhotometricLossConfig(photometric["weight"])
             if isinstance(photometric, dict) and "weight" in photometric
@@ -148,6 +155,12 @@ class PhaseConfig:
                 weight=opacity_sparsity["weight"]
             )
             if isinstance(opacity_sparsity, dict) and "weight" in opacity_sparsity
+            else None,
+            scale_ratio_loss=ScaleRatioLossConfig(
+                weight=scale_ratio["weight"],
+                max_ratio=scale_ratio.get("max_ratio"),
+            )
+            if isinstance(scale_ratio, dict) and "weight" in scale_ratio
             else None,
             steps=data.get("steps"),
             cam_count=data.get("cam_count"),

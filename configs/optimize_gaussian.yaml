@@ -16,6 +16,9 @@ phase_settings:
       max_scale: 0.04
       min_weight: 0.1
       max_weight: 10.0
+    scale_ratio_loss:
+      weight: 0.01
+      max_ratio: 2.0
     opacity_sparsity_loss:
       weight: 0.001
     photometric_loss:
