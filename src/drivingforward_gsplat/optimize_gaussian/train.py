@@ -369,10 +369,10 @@ def optimize_gaussians(
     merge_cfg = MergeConfig(
         every=cfg.merge.every,
         voxel_size=cfg.merge.voxel_size,
+        voxel_size_distance_scale=cfg.merge.voxel_size_distance_scale,
         small_scale=cfg.merge.small_scale,
         prune_thin_opacity=cfg.merge.prune_thin_opacity,
         color_bin=cfg.merge.color_bin,
-        min_distance=cfg.merge.min_distance,
     )
 
     optimizers = _prepare_optimizers(params, cfg.lr)
@@ -389,19 +389,23 @@ def optimize_gaussians(
     )
 
     if raw_views:
-        _save_debug_image(
-            cfg,
-            "step_0000_cam0",
-            raw_views[0],
-            means,
-            rotations,
-            scales,
-            opacities,
-            shs,
-        )
-        _save_debug_ply(
-            cfg, "step_0000", means, rotations, scales, opacities, shs
-        )
+        views_by_cam: Dict[int, Dict] = {}
+        for view in raw_views:
+            cam_idx = int(view["cam_idx"])
+            if cam_idx not in views_by_cam:
+                views_by_cam[cam_idx] = view
+        for cam_idx, view in views_by_cam.items():
+            _save_debug_image(
+                cfg,
+                f"step_0000_cam{cam_idx}",
+                view,
+                means,
+                rotations,
+                scales,
+                opacities,
+                shs,
+            )
+        _save_debug_ply(cfg, "step_0000", means, rotations, scales, opacities, shs)
         print("[optimize] saved debug snapshot for phase=init step=0")
 
     all_cams = sorted({v["cam_idx"] for v in raw_views})
@@ -615,7 +619,10 @@ def optimize_gaussians(
 
             if cfg.merge.every > 0 and (global_step % cfg.merge.every == 0):
                 camera_center = None
-                if merge_cfg.min_distance is not None and merge_cfg.min_distance > 0:
+                if (
+                    merge_cfg.voxel_size_distance_scale is not None
+                    and merge_cfg.voxel_size_distance_scale > 0
+                ):
                     camera_center = _camera_center_from_view(view)
                 (
                     new_means,
