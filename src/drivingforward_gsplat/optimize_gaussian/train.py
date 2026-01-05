@@ -272,8 +272,8 @@ def _save_debug_snapshot(
     shs: torch.Tensor,
 ) -> None:
     debug_root = os.path.join(cfg.output_dir, cfg.debug_dir_name)
-    phase_dir = os.path.join(debug_root, f"phase_{phase_name}_step_{phase_step:04d}")
-    os.makedirs(phase_dir, exist_ok=True)
+    os.makedirs(debug_root, exist_ok=True)
+    base_name = f"phase_{phase_name}_step_{phase_step:04d}"
 
     rendered = gs_render.render(
         novel_FovX=0.0,
@@ -293,10 +293,10 @@ def _save_debug_snapshot(
         bg_color=view["bg_color"],
         with_postprocess=False,
     )
-    image_path = os.path.join(phase_dir, "novel_view.png")
+    image_path = os.path.join(debug_root, f"{base_name}.png")
     to_pil_rgb(rendered).save(image_path)
 
-    inria_path = os.path.join(phase_dir, "gaussians_inria.ply")
+    inria_path = os.path.join(debug_root, f"{base_name}.ply")
     save_gaussians_tensors_as_inria_ply(
         means.detach().cpu(),
         rotations.detach().cpu(),
