@@ -125,6 +125,8 @@ def _resolve_phase_loss(
         "fixer_loss_weight": 0.02,
         "fixer_low_freq_weight": 1.0,
         "fixer_lpips_weight": 0.1,
+        "fixer_use_lpips": True,
+        "fixer_lpips_net": "vgg",
         "lambda_sigma": cfg.lambda_sigma,
         "sigma_min": cfg.sigma_min,
         "danger_percentile": cfg.danger_percentile,
@@ -140,6 +142,16 @@ def _resolve_phase_loss(
             base["fixer_loss_weight"] = float(phase_cfg.fixer_loss.weight)
             base["fixer_low_freq_weight"] = float(phase_cfg.fixer_loss.low_freq_weight)
             base["fixer_lpips_weight"] = float(phase_cfg.fixer_loss.lpips_weight)
+            base["fixer_use_lpips"] = (
+                phase_cfg.fixer_loss.use_lpips
+                if phase_cfg.fixer_loss.use_lpips is not None
+                else base["fixer_use_lpips"]
+            )
+            base["fixer_lpips_net"] = (
+                phase_cfg.fixer_loss.lpips_net
+                if phase_cfg.fixer_loss.lpips_net is not None
+                else base["fixer_lpips_net"]
+            )
             base["danger_percentile"] = _apply_optional(
                 phase_cfg.fixer_loss.danger_percentile, base["danger_percentile"]
             )
@@ -403,8 +415,8 @@ def optimize_gaussians(
                 gamma=float(phase_loss_cfg["gamma"]),
                 low_freq_weight=float(phase_loss_cfg["fixer_low_freq_weight"]),
                 lpips_weight=float(phase_loss_cfg["fixer_lpips_weight"]),
-                use_lpips=cfg.use_lpips,
-                lpips_net=cfg.lpips_net,
+                use_lpips=bool(phase_loss_cfg["fixer_use_lpips"]),
+                lpips_net=str(phase_loss_cfg["fixer_lpips_net"]),
             )
         )
         print(

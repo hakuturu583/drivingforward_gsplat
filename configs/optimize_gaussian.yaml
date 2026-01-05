@@ -23,6 +23,8 @@ phase_settings:
       weight: 0.0
       low_freq_weight: 1.0
       lpips_weight: 0.1
+      use_lpips: true
+      lpips_net: vgg
     jitter_cm: 1.0
   phase2:
     steps: 1000
@@ -34,6 +36,8 @@ phase_settings:
       weight: 0.02
       low_freq_weight: 1.0
       lpips_weight: 0.1
+      use_lpips: true
+      lpips_net: vgg
     jitter_cm: 3.0
   phase3:
     steps: 1000
@@ -45,6 +49,8 @@ phase_settings:
       weight: 0.02
       low_freq_weight: 1.0
       lpips_weight: 0.1
+      use_lpips: true
+      lpips_net: vgg
     jitter_cm: 5.0
 merge_every: 200
 merge_voxel_size: 0.05
@@ -63,8 +69,6 @@ sky_mask:
   sam3_dtype: auto
   sam3_mask_threshold: 0.5
   sam3_resize_longest_side: null
-use_lpips: true
-lpips_net: vgg
 background_color:
   - 1.0
   - 1.0

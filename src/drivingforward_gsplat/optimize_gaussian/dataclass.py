@@ -20,6 +20,8 @@ class PhotometricLossConfig(LossConfig):
 class FixerLossConfig(LossConfig):
     low_freq_weight: float = 1.0
     lpips_weight: float = 0.1
+    use_lpips: Optional[bool] = None
+    lpips_net: Optional[str] = None
     danger_percentile: Optional[float] = None
     blur_sigma: Optional[float] = None
     gamma: Optional[float] = None
@@ -89,6 +91,8 @@ class PhaseConfig:
                 weight=fixer["weight"],
                 low_freq_weight=fixer.get("low_freq_weight", 1.0),
                 lpips_weight=fixer.get("lpips_weight", 0.1),
+                use_lpips=fixer.get("use_lpips"),
+                lpips_net=fixer.get("lpips_net"),
                 danger_percentile=fixer.get("danger_percentile"),
                 blur_sigma=fixer.get("blur_sigma"),
                 gamma=fixer.get("gamma"),
@@ -135,8 +139,6 @@ class OptimizeGaussianConfig:
     background_remove_step: Optional[int] = None
     log_every: int = 50
     sky_mask: SkyMaskConfig = SkyMaskConfig()
-    use_lpips: bool = True
-    lpips_net: str = "vgg"
     background_color: List[float] = None
     random_seed: int = 0
     phase_settings: Optional[Dict[str, PhaseConfig]] = None
@@ -188,8 +190,6 @@ class OptimizeGaussianConfig:
             ),
             log_every=int(data.get("log_every", cls.log_every)),
             sky_mask=sky_mask,
-            use_lpips=bool(data.get("use_lpips", cls.use_lpips)),
-            lpips_net=data.get("lpips_net", cls.lpips_net),
             background_color=data.get("background_color", cls.background_color),
             random_seed=int(data.get("random_seed", cls.random_seed)),
             phase_settings=phase_settings,
