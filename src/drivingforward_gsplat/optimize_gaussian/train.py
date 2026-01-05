@@ -273,7 +273,7 @@ def _save_debug_snapshot(
 ) -> None:
     debug_root = os.path.join(cfg.output_dir, cfg.debug_dir_name)
     os.makedirs(debug_root, exist_ok=True)
-    base_name = f"phase_{phase_name}_step_{phase_step:04d}"
+    base_name = f"step_{phase_step:04d}"
 
     rendered = gs_render.render(
         novel_FovX=0.0,
@@ -641,29 +641,7 @@ def optimize_gaussians(
                     f"[optimize] merged at step={global_step} gaussians={means.shape[0]}"
                 )
 
-        if raw_subset:
-            views_by_cam: Dict[int, Dict] = {}
-            for view in raw_subset:
-                cam_idx = int(view["cam_idx"])
-                if cam_idx not in views_by_cam:
-                    views_by_cam[cam_idx] = view
-            for cam_idx, view in views_by_cam.items():
-                _save_debug_snapshot(
-                    cfg,
-                    f"{phase_id}_cam{cam_idx}",
-                    global_step,
-                    view,
-                    means,
-                    rotations,
-                    scales,
-                    opacities,
-                    shs,
-                )
-            print(
-                f"[optimize] saved debug snapshot for phase={phase_id} "
-                f"cams={sorted(views_by_cam.keys())} step={global_step}"
-            )
-        elif last_view is not None:
+        if last_view is not None:
             _save_debug_snapshot(
                 cfg,
                 phase_id,
