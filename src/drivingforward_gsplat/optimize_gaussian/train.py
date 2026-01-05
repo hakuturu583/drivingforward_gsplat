@@ -346,9 +346,9 @@ def optimize_gaussians(
                 cfg.background_freeze_steps > 0
                 and global_step <= cfg.background_freeze_steps
             ):
-                visibility = fg_mask.to(dtype=means.dtype)
+                visibility = fg_mask
             else:
-                visibility = torch.ones_like(fg_mask, dtype=means.dtype)
+                visibility = torch.ones_like(fg_mask, dtype=torch.bool)
             for opt in optimizers.values():
                 opt.step(visibility=visibility)
 
