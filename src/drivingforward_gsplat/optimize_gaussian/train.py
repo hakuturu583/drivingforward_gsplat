@@ -320,7 +320,7 @@ def optimize_gaussians(
     fg_mask = ~bg_mask
 
     initial_phase_loss = _resolve_phase_loss(cfg, "phase0")
-    initial_sigma_min = float(initial_phase_loss["sigma_min"])
+    initial_sigma_min = float(initial_phase_loss["min_scale"])
     _clamp_scales(scales.data, initial_sigma_min, fg_mask)
     merge_cfg = MergeConfig(
         every=cfg.merge.every,
@@ -351,13 +351,13 @@ def optimize_gaussians(
     optimizers = _prepare_optimizers(params, cfg.lr)
     fixer_loss = FixerLoss(
         FixerLossParams(
-            danger_percentile=cfg.danger_percentile,
-            blur_sigma=cfg.blur_sigma,
-            gamma=cfg.gamma,
-            low_freq_weight=1.0,
-            lpips_weight=0.1,
-            use_lpips=cfg.use_lpips,
-            lpips_net=cfg.lpips_net,
+            danger_percentile=float(initial_phase_loss["danger_percentile"]),
+            blur_sigma=float(initial_phase_loss["blur_sigma"]),
+            gamma=float(initial_phase_loss["gamma"]),
+            low_freq_weight=float(initial_phase_loss["fixer_low_freq_weight"]),
+            lpips_weight=float(initial_phase_loss["fixer_lpips_weight"]),
+            use_lpips=bool(initial_phase_loss["fixer_use_lpips"]),
+            lpips_net=str(initial_phase_loss["fixer_lpips_net"]),
         )
     )
 
