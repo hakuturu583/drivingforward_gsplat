@@ -17,6 +17,7 @@ from drivingforward_gsplat.optimize_gaussian.train import (
     erode_mask,
     optimize_gaussians,
 )
+from drivingforward_gsplat.utils.gaussian_ply import save_gaussians_tensors_as_inria_ply
 
 
 def _load_image(path: Path) -> torch.Tensor:
@@ -93,6 +94,17 @@ def _save_gaussians_to_ply(path: str, gaussians: Dict[str, torch.Tensor]) -> Non
         shN=shN,
         format="ply",
         save_to=path,
+    )
+
+
+def _save_gaussians_to_inria_ply(path: str, gaussians: Dict[str, torch.Tensor]) -> None:
+    save_gaussians_tensors_as_inria_ply(
+        gaussians["means"],
+        gaussians["rotations"],
+        gaussians["scales"],
+        gaussians["opacities"],
+        gaussians["shs"],
+        path,
     )
 
 
@@ -221,6 +233,8 @@ def optimize_from_prediction(
 
     output_path = os.path.join(cfg.output_dir, cfg.output_ply_name)
     _save_gaussians_to_ply(output_path, optimized)
+    optimized_inria = os.path.join(cfg.output_dir, "optimized_inria.ply")
+    _save_gaussians_to_inria_ply(optimized_inria, optimized)
     return output_path
 
 

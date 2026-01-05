@@ -247,3 +247,72 @@ def save_gaussians_as_inria_ply(
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     PlyData([PlyElement.describe(data, "vertex")], text=False).write(output_path)
     return output_path
+
+
+def save_gaussians_tensors_as_inria_ply(
+    xyz: torch.Tensor,
+    rot: torch.Tensor,
+    scale: torch.Tensor,
+    opacity: torch.Tensor,
+    sh: torch.Tensor,
+    output_path: str,
+) -> str:
+    scale = torch.clamp(scale, min=1e-8)
+    opacity = torch.clamp(opacity, min=1e-6, max=1.0 - 1e-6)
+    scale_log = torch.log(scale)
+    opacity_logit = torch.log(opacity / (1.0 - opacity))
+
+    xyz_np = xyz.detach().cpu().numpy().astype(np.float32)
+    rot_np = rot.detach().cpu().numpy().astype(np.float32)
+    scale_np = scale_log.detach().cpu().numpy().astype(np.float32)
+    opacity_np = opacity_logit.detach().cpu().numpy().astype(np.float32)
+    sh_np = sh.detach().cpu().numpy().astype(np.float32)
+
+    num = xyz_np.shape[0]
+    d_sh = sh_np.shape[1]
+    rest_dim = max(d_sh - 1, 0)
+    dtype_fields = (
+        [
+            ("x", "f4"),
+            ("y", "f4"),
+            ("z", "f4"),
+            ("nx", "f4"),
+            ("ny", "f4"),
+            ("nz", "f4"),
+        ]
+        + [(f"f_dc_{i}", "f4") for i in range(3)]
+        + [(f"f_rest_{i}", "f4") for i in range(rest_dim * 3)]
+        + [("opacity", "f4")]
+        + [(f"scale_{i}", "f4") for i in range(3)]
+        + [(f"rot_{i}", "f4") for i in range(4)]
+    )
+
+    data = np.zeros(num, dtype=dtype_fields)
+    data["x"] = xyz_np[:, 0]
+    data["y"] = xyz_np[:, 1]
+    data["z"] = xyz_np[:, 2]
+    data["nx"] = 0.0
+    data["ny"] = 0.0
+    data["nz"] = 0.0
+
+    data["f_dc_0"] = sh_np[:, 0, 0]
+    data["f_dc_1"] = sh_np[:, 0, 1]
+    data["f_dc_2"] = sh_np[:, 0, 2]
+
+    if rest_dim > 0:
+        sh_rest = sh_np[:, 1:, :].transpose(0, 2, 1).reshape(num, -1)
+        for idx in range(rest_dim * 3):
+            data[f"f_rest_{idx}"] = sh_rest[:, idx]
+
+    data["opacity"] = opacity_np[:, 0] if opacity_np.ndim > 1 else opacity_np
+    data["scale_0"] = scale_np[:, 0]
+    data["scale_1"] = scale_np[:, 1]
+    data["scale_2"] = scale_np[:, 2]
+    data["rot_0"] = rot_np[:, 0]
+    data["rot_1"] = rot_np[:, 1]
+    data["rot_2"] = rot_np[:, 2]
+    data["rot_3"] = rot_np[:, 3]
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    PlyData([PlyElement.describe(data, "vertex")], text=False).write(output_path)
+    return output_path
