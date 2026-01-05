@@ -88,6 +88,7 @@ class PhaseConfig:
     steps: Optional[int] = None
     cam_count: Optional[int] = None
     jitter_views_per_cam: Optional[int] = None
+    fixer_view_use_ratio: Optional[float] = None
     jitter_cm: Optional[float] = None
     danger_percentile: Optional[float] = None
     blur_sigma: Optional[float] = None
@@ -128,6 +129,7 @@ class PhaseConfig:
             steps=data.get("steps"),
             cam_count=data.get("cam_count"),
             jitter_views_per_cam=data.get("jitter_views_per_cam"),
+            fixer_view_use_ratio=data.get("fixer_view_use_ratio"),
             jitter_cm=data.get("jitter_cm"),
             danger_percentile=data.get("danger_percentile"),
             blur_sigma=data.get("blur_sigma"),
@@ -143,7 +145,6 @@ class OptimizeGaussianConfig:
     debug_dir_name: str = "debug"
     device: str = "cuda"
     lr: float = 5e-3
-    fixer_ratio: float = 0.33
     merge: MergeStrategyConfig = MergeStrategyConfig()
     background_freeze_steps: Optional[int] = 500
     background_remove_step: Optional[int] = None
@@ -182,7 +183,6 @@ class OptimizeGaussianConfig:
             debug_dir_name=data.get("debug_dir_name", cls.debug_dir_name),
             device=data.get("device", cls.device),
             lr=float(data.get("lr", cls.lr)),
-            fixer_ratio=float(data.get("fixer_ratio", cls.fixer_ratio)),
             merge=merge,
             background_freeze_steps=data.get(
                 "background_freeze_steps", cls.background_freeze_steps

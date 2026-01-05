@@ -178,6 +178,7 @@ def _resolve_phase_runtime(
     steps = default_steps
     cam_count = default_cam_count
     jitter_views_per_cam = default_jitter_views_per_cam
+    fixer_view_use_ratio = 0.33
     if cfg.phase_settings and phase_id in cfg.phase_settings:
         phase_cfg = cfg.phase_settings[phase_id]
         if phase_cfg.steps is not None:
@@ -186,10 +187,13 @@ def _resolve_phase_runtime(
             cam_count = int(phase_cfg.cam_count)
         if phase_cfg.jitter_views_per_cam is not None:
             jitter_views_per_cam = int(phase_cfg.jitter_views_per_cam)
+        if phase_cfg.fixer_view_use_ratio is not None:
+            fixer_view_use_ratio = float(phase_cfg.fixer_view_use_ratio)
     return {
         "steps": steps,
         "cam_count": cam_count,
         "jitter_views_per_cam": jitter_views_per_cam,
+        "fixer_view_use_ratio": fixer_view_use_ratio,
     }
 
 
@@ -395,6 +399,7 @@ def optimize_gaussians(
     rng = random.Random(cfg.random_seed)
     for phase_id, phase_mode, runtime, cam_indices in phases:
         steps = int(runtime["steps"])
+        fixer_view_use_ratio = float(runtime["fixer_view_use_ratio"])
         if steps <= 0:
             continue
         phase_loss_cfg = _resolve_phase_loss(cfg, phase_id)
@@ -431,7 +436,7 @@ def optimize_gaussians(
             if phase_mode == "raw" or not fixer_subset:
                 view = random.choice(raw_subset)
             else:
-                if random.random() < cfg.fixer_ratio and fixer_subset:
+                if random.random() < fixer_view_use_ratio and fixer_subset:
                     view = random.choice(fixer_subset)
                 else:
                     view = random.choice(raw_subset)
