@@ -50,6 +50,7 @@ class PredictGaussianConfig:
     cpu: bool = False
     sdxl_panorama_i2i_config: Optional[str] = "configs/sdxl_panorama_i2i.yaml"
     sdxl_panorama_prompt_config: Optional[str] = None
+    optimize_gaussian_config: Optional[str] = None
 
     @classmethod
     def from_yaml(cls, path: str) -> "PredictGaussianConfig":
@@ -71,6 +72,9 @@ class PredictGaussianConfig:
             ),
             sdxl_panorama_prompt_config=data.get(
                 "sdxl_panorama_prompt_config", cls.sdxl_panorama_prompt_config
+            ),
+            optimize_gaussian_config=data.get(
+                "optimize_gaussian_config", cls.optimize_gaussian_config
             ),
         )
 
@@ -541,10 +545,17 @@ def main() -> None:
         default=None,
         help="SDXL panorama prompt yaml file path. When set, i2i is applied.",
     )
+    parser.add_argument(
+        "--optimize-gaussian-config",
+        default=None,
+        help="Optimize gaussian config yaml file path. When set, gsplat optimization runs after prediction.",
+    )
     args = parser.parse_args()
     predict_cfg = PredictGaussianConfig.from_yaml(args.predict_config)
     if args.sdxl_panorama_prompt_config:
         predict_cfg.sdxl_panorama_prompt_config = args.sdxl_panorama_prompt_config
+    if args.optimize_gaussian_config:
+        predict_cfg.optimize_gaussian_config = args.optimize_gaussian_config
 
     from drivingforward_gsplat.dataset import EnvNuScenesDataset, get_transforms
 
@@ -629,6 +640,26 @@ def main() -> None:
     )
     print(f"Saved gaussians: {output_path}")
     print(f"Saved gaussians (inria): {output_inria_path}")
+
+    if predict_cfg.optimize_gaussian_config:
+        from drivingforward_gsplat.optimize_gaussian.optimize_gaussian import (
+            optimize_from_prediction,
+        )
+
+        optimize_cfg_path = _resolve_path(predict_cfg.optimize_gaussian_config)
+        if optimize_cfg_path is None:
+            raise ValueError("optimize_gaussian_config is required when set.")
+        del model
+        del outputs
+        del inputs
+        torch.cuda.empty_cache()
+        optimized_path = optimize_from_prediction(
+            optimize_cfg_path,
+            sample,
+            output_token,
+            output_dir,
+        )
+        print(f"Optimized gaussians saved: {optimized_path}")
 
 
 if __name__ == "__main__":

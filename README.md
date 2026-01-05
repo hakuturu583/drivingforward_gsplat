@@ -37,3 +37,13 @@ uv run python -m drivingforward_gsplat.predict_gaussian \
 ```
 
 Use `--sdxl-panorama-prompt-config` to enable SDXL panorama i2i. The prompt config format matches the SDXL i2i tool and supports `reference_images` for IP-Adapter.
+
+### Optimize gaussian (gsplat)
+
+```bash
+uv run python -m drivingforward_gsplat.predict_gaussian \
+  --predict-config configs/predict_gaussian.yaml \
+  --optimize-gaussian-config configs/optimize_gaussian.yaml
+```
+
+This runs prediction, then optimizes the exported gaussians with gsplat using raw NuScenes views as anchors and Fixer outputs as regularization. Sky masks are excluded from losses and merge/densify, and Fixer is weighted lightly to avoid overfitting. Update `configs/optimize_gaussian.yaml` to tune view counts per phase, merge frequency, sigma minimums, and Fixer weights.
