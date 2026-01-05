@@ -5,11 +5,11 @@ debug_dir_name: debug
 device: cuda
 lr: 0.005
 fixer_ratio: 0.33
-lambda_sigma: 0.1
-sigma_min: 0.03
 phase_settings:
   phase0:
-    sigma_min: 0.03
+    minscale_loss:
+      weight: 0.1
+      min_scale: 0.03
   phase1:
     steps: 1000
     cam_count: 6

@@ -127,8 +127,8 @@ def _resolve_phase_loss(
         "fixer_lpips_weight": 0.1,
         "fixer_use_lpips": True,
         "fixer_lpips_net": "vgg",
-        "lambda_sigma": cfg.lambda_sigma,
-        "sigma_min": cfg.sigma_min,
+        "lambda_sigma": 0.1,
+        "min_scale": 0.03,
         "danger_percentile": 0.25,
         "blur_sigma": 1.5,
         "gamma": 5.0,
@@ -161,14 +161,10 @@ def _resolve_phase_loss(
             base["gamma"] = _apply_optional(phase_cfg.fixer_loss.gamma, base["gamma"])
         if phase_cfg.minscale_loss is not None:
             base["lambda_sigma"] = float(phase_cfg.minscale_loss.weight)
-            base["sigma_min"] = _apply_optional(
-                phase_cfg.minscale_loss.sigma_min, base["sigma_min"]
+            base["min_scale"] = _apply_optional(
+                phase_cfg.minscale_loss.min_scale, base["min_scale"]
             )
         base["jitter_cm"] = _apply_optional(phase_cfg.jitter_cm, base["jitter_cm"])
-        base["sigma_min"] = _apply_optional(phase_cfg.sigma_min, base["sigma_min"])
-        base["lambda_sigma"] = _apply_optional(
-            phase_cfg.lambda_sigma, base["lambda_sigma"]
-        )
     return base
 
 
@@ -402,7 +398,7 @@ def optimize_gaussians(
         if steps <= 0:
             continue
         phase_loss_cfg = _resolve_phase_loss(cfg, phase_id)
-        phase_sigma_min = float(phase_loss_cfg["sigma_min"])
+        phase_sigma_min = float(phase_loss_cfg["min_scale"])
         lambda_raw = float(phase_loss_cfg["photometric_loss_weight"])
         lambda_fix = float(phase_loss_cfg["fixer_loss_weight"])
         lambda_sigma = float(phase_loss_cfg["lambda_sigma"])

@@ -29,7 +29,7 @@ class FixerLossConfig(LossConfig):
 
 @dataclass
 class MinScaleLossConfig(LossConfig):
-    sigma_min: Optional[float] = None
+    min_scale: Optional[float] = None
 
 
 @dataclass
@@ -89,14 +89,17 @@ class PhaseConfig:
     cam_count: Optional[int] = None
     jitter_views_per_cam: Optional[int] = None
     jitter_cm: Optional[float] = None
-    sigma_min: Optional[float] = None
-    lambda_sigma: Optional[float] = None
     danger_percentile: Optional[float] = None
     blur_sigma: Optional[float] = None
     gamma: Optional[float] = None
 
     @classmethod
     def from_dict(cls, data: Dict) -> "PhaseConfig":
+        if "sigma_min" in data or "lambda_sigma" in data or "min_scale" in data:
+            raise ValueError(
+                "Use minscale_loss.{weight,min_scale} under phase_settings instead of "
+                "sigma_min/lambda_sigma/min_scale."
+            )
         photometric = data.get("photometric_loss")
         fixer = data.get("fixer_loss")
         minscale = data.get("minscale_loss")
@@ -118,7 +121,7 @@ class PhaseConfig:
             else None,
             minscale_loss=MinScaleLossConfig(
                 weight=minscale["weight"],
-                sigma_min=minscale.get("sigma_min"),
+                min_scale=minscale.get("min_scale"),
             )
             if isinstance(minscale, dict) and "weight" in minscale
             else None,
@@ -126,8 +129,6 @@ class PhaseConfig:
             cam_count=data.get("cam_count"),
             jitter_views_per_cam=data.get("jitter_views_per_cam"),
             jitter_cm=data.get("jitter_cm"),
-            sigma_min=data.get("sigma_min"),
-            lambda_sigma=data.get("lambda_sigma"),
             danger_percentile=data.get("danger_percentile"),
             blur_sigma=data.get("blur_sigma"),
             gamma=data.get("gamma"),
@@ -143,8 +144,6 @@ class OptimizeGaussianConfig:
     device: str = "cuda"
     lr: float = 5e-3
     fixer_ratio: float = 0.33
-    lambda_sigma: float = 0.1
-    sigma_min: float = 0.03
     merge: MergeStrategyConfig = MergeStrategyConfig()
     background_freeze_steps: Optional[int] = 500
     background_remove_step: Optional[int] = None
@@ -158,6 +157,10 @@ class OptimizeGaussianConfig:
     def from_yaml(cls, path: str) -> "OptimizeGaussianConfig":
         with open(path, "r") as f:
             data = yaml.safe_load(f) or {}
+        if "sigma_min" in data or "lambda_sigma" in data or "min_scale" in data:
+            raise ValueError(
+                "Use phase_settings.phase0.minscale_loss for min_scale/weight."
+            )
         raw_phase_settings = data.get("phase_settings", {})
         raw_sky_mask = data.get("sky_mask", {})
         raw_merge = data.get("merge", {})
@@ -180,8 +183,6 @@ class OptimizeGaussianConfig:
             device=data.get("device", cls.device),
             lr=float(data.get("lr", cls.lr)),
             fixer_ratio=float(data.get("fixer_ratio", cls.fixer_ratio)),
-            lambda_sigma=float(data.get("lambda_sigma", cls.lambda_sigma)),
-            sigma_min=float(data.get("sigma_min", cls.sigma_min)),
             merge=merge,
             background_freeze_steps=data.get(
                 "background_freeze_steps", cls.background_freeze_steps
