@@ -65,8 +65,8 @@ phase_settings:
       gamma: 5.0
     jitter_cm: 5.0
 merge:
-  every: 400
-  voxel_size: 0.03
+  every: 800
+  voxel_size: 0.02
   small_scale: 0.015
   thin_opacity: 0.03
   color_bin: 0.03
