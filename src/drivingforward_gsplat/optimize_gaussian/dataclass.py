@@ -64,6 +64,23 @@ class SkyMaskConfig:
 
 
 @dataclass
+class MergeStrategyConfig:
+    every: int = 200
+    voxel_size: float = 0.05
+    small_scale: float = 0.02
+    thin_opacity: float = 0.05
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "MergeStrategyConfig":
+        return cls(
+            every=int(data.get("every", cls.every)),
+            voxel_size=float(data.get("voxel_size", cls.voxel_size)),
+            small_scale=float(data.get("small_scale", cls.small_scale)),
+            thin_opacity=float(data.get("thin_opacity", cls.thin_opacity)),
+        )
+
+
+@dataclass
 class PhaseConfig:
     photometric_loss: Optional[PhotometricLossConfig] = None
     fixer_loss: Optional[FixerLossConfig] = None
@@ -131,10 +148,7 @@ class OptimizeGaussianConfig:
     gamma: float = 5.0
     lambda_sigma: float = 0.1
     sigma_min: float = 0.03
-    merge_every: int = 200
-    merge_voxel_size: float = 0.05
-    merge_small_scale: float = 0.02
-    merge_thin_opacity: float = 0.05
+    merge: MergeStrategyConfig = MergeStrategyConfig()
     background_freeze_steps: Optional[int] = 500
     background_remove_step: Optional[int] = None
     log_every: int = 50
@@ -149,6 +163,7 @@ class OptimizeGaussianConfig:
             data = yaml.safe_load(f) or {}
         raw_phase_settings = data.get("phase_settings", {})
         raw_sky_mask = data.get("sky_mask", {})
+        raw_merge = data.get("merge", {})
         phase_settings = None
         if isinstance(raw_phase_settings, dict) and raw_phase_settings:
             phase_settings = {
@@ -159,6 +174,7 @@ class OptimizeGaussianConfig:
         sky_mask = (
             SkyMaskConfig.from_dict(raw_sky_mask) if raw_sky_mask else cls.sky_mask
         )
+        merge = MergeStrategyConfig.from_dict(raw_merge) if raw_merge else cls.merge
         return cls(
             gaussian_ply_path=data.get("gaussian_ply_path"),
             output_dir=data.get("output_dir", cls.output_dir),
@@ -174,14 +190,7 @@ class OptimizeGaussianConfig:
             gamma=float(data.get("gamma", cls.gamma)),
             lambda_sigma=float(data.get("lambda_sigma", cls.lambda_sigma)),
             sigma_min=float(data.get("sigma_min", cls.sigma_min)),
-            merge_every=int(data.get("merge_every", cls.merge_every)),
-            merge_voxel_size=float(data.get("merge_voxel_size", cls.merge_voxel_size)),
-            merge_small_scale=float(
-                data.get("merge_small_scale", cls.merge_small_scale)
-            ),
-            merge_thin_opacity=float(
-                data.get("merge_thin_opacity", cls.merge_thin_opacity)
-            ),
+            merge=merge,
             background_freeze_steps=data.get(
                 "background_freeze_steps", cls.background_freeze_steps
             ),

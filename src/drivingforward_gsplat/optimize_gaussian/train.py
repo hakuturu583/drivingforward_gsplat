@@ -323,10 +323,10 @@ def optimize_gaussians(
     initial_sigma_min = float(initial_phase_loss["sigma_min"])
     _clamp_scales(scales.data, initial_sigma_min, fg_mask)
     merge_cfg = MergeConfig(
-        every=cfg.merge_every,
-        voxel_size=cfg.merge_voxel_size,
-        small_scale=cfg.merge_small_scale,
-        thin_opacity=cfg.merge_thin_opacity,
+        every=cfg.merge.every,
+        voxel_size=cfg.merge.voxel_size,
+        small_scale=cfg.merge.small_scale,
+        thin_opacity=cfg.merge.thin_opacity,
     )
     (
         means.data,
@@ -538,7 +538,7 @@ def optimize_gaussians(
                     f"gaussians={means.shape[0]}"
                 )
 
-            if cfg.merge_every > 0 and (global_step % cfg.merge_every == 0):
+            if cfg.merge.every > 0 and (global_step % cfg.merge.every == 0):
                 (
                     new_means,
                     new_rots,

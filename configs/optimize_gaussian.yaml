@@ -52,10 +52,11 @@ phase_settings:
       use_lpips: true
       lpips_net: vgg
     jitter_cm: 5.0
-merge_every: 200
-merge_voxel_size: 0.05
-merge_small_scale: 0.02
-merge_thin_opacity: 0.05
+merge:
+  every: 200
+  voxel_size: 0.05
+  small_scale: 0.02
+  thin_opacity: 0.05
 background_freeze_steps: null
 background_remove_step: null
 log_every: 50
