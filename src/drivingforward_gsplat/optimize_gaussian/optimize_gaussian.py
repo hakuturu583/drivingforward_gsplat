@@ -98,6 +98,19 @@ def _prepare_view_entries(
     if isinstance(extrinsics, np.ndarray):
         extrinsics = torch.from_numpy(extrinsics)
 
+    def _squeeze_batch(tensor: torch.Tensor) -> torch.Tensor:
+        if tensor is None:
+            return tensor
+        if tensor.dim() >= 1 and tensor.shape[0] == 1:
+            return tensor.squeeze(0)
+        return tensor
+
+    raw_images = _squeeze_batch(raw_images)
+    if masks is not None:
+        masks = _squeeze_batch(masks)
+    k_all = _squeeze_batch(k_all)
+    extrinsics = _squeeze_batch(extrinsics)
+
     extrinsics_inv = torch.inverse(extrinsics)
 
     raw_views: List[Dict] = []
