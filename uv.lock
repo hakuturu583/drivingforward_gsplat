@@ -482,7 +482,7 @@ requires-dist = [
     { name = "torch", marker = "sys_platform == 'linux'", specifier = "==2.4.0+cu124", index = "https://download.pytorch.org/whl/cu124" },
     { name = "torchvision", marker = "sys_platform == 'darwin'", specifier = "==0.19.0" },
     { name = "torchvision", marker = "sys_platform == 'linux'", specifier = "==0.19.0+cu124", index = "https://download.pytorch.org/whl/cu124" },
-    { name = "transformers", specifier = ">=4.38.0" },
+    { name = "transformers", git = "https://github.com/huggingface/transformers.git?rev=v5.0.0rc1" },
     { name = "xformers", specifier = ">=0.0.27.post2" },
 ]
 
@@ -2908,7 +2908,7 @@ wheels = [
 [[package]]
 name = "transformers"
 version = "5.0.0rc1"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/huggingface/transformers.git?rev=v5.0.0rc1#bdc85cb85c8772d37aa29ce447860b44d7fad6ef" }
 dependencies = [
     { name = "filelock" },
     { name = "huggingface-hub" },
@@ -2921,10 +2921,6 @@ dependencies = [
     { name = "tokenizers" },
     { name = "tqdm" },
     { name = "typer-slim" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/2f/33/c4d7a86f5a60fda56e72f90911ce859044ecdac1dcea4cf904c1eb20ecf2/transformers-5.0.0rc1.tar.gz", hash = "sha256:1fdde557b96ef8ea277c45b8e0d558f1e167fe28a98593f4c4aec0277e335821", size = 8208085, upload-time = "2025-12-11T17:21:23.486Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/fb/74/fd8aef40d2bf2a15c0e02a0d867ebbf488ccca79fcf45efa51ec8e40c004/transformers-5.0.0rc1-py3-none-any.whl", hash = "sha256:8b9604700769872cab4280dbcde201f557e93f72ee5a85c4592275ab4f15d330", size = 9873024, upload-time = "2025-12-11T17:21:20.348Z" },
 ]
 
 [[package]]

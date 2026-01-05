@@ -58,6 +58,7 @@ torchvision = [
   { index = "pytorch-cu124", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 depth-anything-3 = { git = "https://github.com/ByteDance-Seed/Depth-Anything-3.git" }
+transformers = { git = "https://github.com/huggingface/transformers.git", rev="v5.0.0rc1"}
 
 [tool.uv.extra-build-dependencies]
 flash-attn = [{ requirement = "torch", match-runtime = true }]
