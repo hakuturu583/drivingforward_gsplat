@@ -56,7 +56,7 @@ class OptimizeGaussianConfig:
     merge_voxel_size: float = 0.05
     merge_small_scale: float = 0.02
     merge_thin_opacity: float = 0.05
-    background_freeze_steps: int = 500
+    background_freeze_steps: Optional[int] = 500
     background_remove_step: Optional[int] = None
     log_every: int = 50
     sky_erode_kernel: int = 3
@@ -114,8 +114,8 @@ class OptimizeGaussianConfig:
             merge_thin_opacity=float(
                 data.get("merge_thin_opacity", cls.merge_thin_opacity)
             ),
-            background_freeze_steps=int(
-                data.get("background_freeze_steps", cls.background_freeze_steps)
+            background_freeze_steps=data.get(
+                "background_freeze_steps", cls.background_freeze_steps
             ),
             background_remove_step=data.get(
                 "background_remove_step", cls.background_remove_step
@@ -472,7 +472,9 @@ def optimize_gaussians(
             for opt in optimizers.values():
                 opt.zero_grad(set_to_none=True)
             loss.backward()
-            if (
+            if cfg.background_freeze_steps is None:
+                visibility = fg_mask
+            elif (
                 cfg.background_freeze_steps > 0
                 and global_step <= cfg.background_freeze_steps
             ):
