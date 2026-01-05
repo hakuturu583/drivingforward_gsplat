@@ -12,6 +12,7 @@ class MergeConfig:
     voxel_size: float = 0.05
     small_scale: float = 0.02
     thin_opacity: float = 0.05
+    color_bin: float = 0.1
 
 
 def _weighted_merge(
@@ -55,6 +56,10 @@ def merge_gaussians(
 
     merge_means = means[merge_idx]
     voxels = torch.floor(merge_means / cfg.voxel_size).to(torch.int32)
+    if cfg.color_bin > 0:
+        base_color = shs[merge_idx][:, 0, :].clamp(0.0, 1.0)
+        color_bins = torch.floor(base_color / cfg.color_bin).to(torch.int32)
+        voxels = torch.cat([voxels, color_bins], dim=1)
     unique, inverse = torch.unique(voxels, dim=0, return_inverse=True)
     num = unique.shape[0]
 
