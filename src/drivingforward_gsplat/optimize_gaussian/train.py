@@ -360,7 +360,9 @@ def optimize_gaussians(
         every=cfg.merge.every,
         voxel_size=cfg.merge.voxel_size,
         small_scale=cfg.merge.small_scale,
-        thin_opacity=cfg.merge.thin_opacity,
+        prune_thin_opacity=cfg.merge.prune_thin_opacity,
+        color_bin=cfg.merge.color_bin,
+        min_distance=cfg.merge.min_distance,
     )
 
     optimizers = _prepare_optimizers(params, cfg.lr)

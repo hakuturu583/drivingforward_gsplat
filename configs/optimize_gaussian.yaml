@@ -19,7 +19,7 @@ phase_settings:
     scale_ratio_loss:
       weight: 0.01
       max_ratio: 2.0
-      gamma: 2.0
+      gamma: 0.2
     opacity_sparsity_loss:
       weight: 0.001
     photometric_loss:
@@ -72,7 +72,7 @@ merge:
   every: 1000
   voxel_size: 0.02
   small_scale: 0.015
-  thin_opacity: 0.03
+  prune_thin_opacity: 0.03
   color_bin: 0.03
   min_distance: 15.0
 background_freeze_steps: null
