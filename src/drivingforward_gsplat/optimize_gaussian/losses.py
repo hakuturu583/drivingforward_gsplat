@@ -75,6 +75,16 @@ class FixerLoss:
             except Exception:
                 self._lpips = None
 
+    def set_config(self, cfg: FixerLossConfig) -> None:
+        self.cfg = cfg
+        if cfg.use_lpips and self._lpips is None:
+            try:
+                import lpips  # type: ignore
+
+                self._lpips = lpips.LPIPS(net=cfg.lpips_net)
+            except Exception:
+                self._lpips = None
+
     def _warn_lpips(self) -> None:
         if self._lpips_warned or not self.cfg.use_lpips:
             return

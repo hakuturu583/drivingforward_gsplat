@@ -45,7 +45,6 @@ class OptimizeGaussianConfig:
     jitter_views_per_cam: int = 4
     fixer_ratio: float = 0.33
     danger_percentile: float = 0.25
-    lambda_fix: float = 0.02
     lambda_fix_low: float = 1.0
     lambda_fix_lpips: float = 0.1
     blur_sigma: float = 1.5
@@ -72,6 +71,7 @@ class OptimizeGaussianConfig:
     lpips_net: str = "vgg"
     background_color: List[float] = None
     random_seed: int = 0
+    phase_settings: Optional[Dict[str, Dict[str, float]]] = None
 
     @classmethod
     def from_yaml(cls, path: str) -> "OptimizeGaussianConfig":
@@ -99,7 +99,6 @@ class OptimizeGaussianConfig:
             danger_percentile=float(
                 data.get("danger_percentile", cls.danger_percentile)
             ),
-            lambda_fix=float(data.get("lambda_fix", cls.lambda_fix)),
             lambda_fix_low=float(data.get("lambda_fix_low", cls.lambda_fix_low)),
             lambda_fix_lpips=float(data.get("lambda_fix_lpips", cls.lambda_fix_lpips)),
             blur_sigma=float(data.get("blur_sigma", cls.blur_sigma)),
@@ -138,6 +137,7 @@ class OptimizeGaussianConfig:
             lpips_net=data.get("lpips_net", cls.lpips_net),
             background_color=data.get("background_color", cls.background_color),
             random_seed=int(data.get("random_seed", cls.random_seed)),
+            phase_settings=data.get("phase_settings", cls.phase_settings),
         )
 
 
@@ -223,6 +223,41 @@ def _select_views(
     if kind is None:
         return filtered
     return [v for v in filtered if v["type"] == kind]
+
+
+def _resolve_phase_loss(
+    cfg: OptimizeGaussianConfig,
+    phase_id: str,
+) -> Dict[str, float]:
+    base = {
+        "photometric_loss_weight": 1.0,
+        "fixer_loss_weight": 0.02,
+        "lambda_fix_low": cfg.lambda_fix_low,
+        "lambda_fix_lpips": cfg.lambda_fix_lpips,
+        "lambda_sigma": cfg.lambda_sigma,
+        "sigma_min": cfg.sigma_min,
+        "danger_percentile": cfg.danger_percentile,
+        "blur_sigma": cfg.blur_sigma,
+        "gamma": cfg.gamma,
+    }
+    overrides: Dict[str, float] = {}
+    if cfg.phase_settings:
+        if phase_id in cfg.phase_settings:
+            phase_override = cfg.phase_settings.get(phase_id, {})
+            if "photometric_loss" in phase_override:
+                overrides["photometric_loss_weight"] = float(
+                    phase_override.get("photometric_loss", {}).get("weight")
+                )
+            if "fixer_loss" in phase_override:
+                overrides["fixer_loss_weight"] = float(
+                    phase_override.get("fixer_loss", {}).get("weight")
+                )
+            for key, value in phase_override.items():
+                if key in ("photometric_loss", "fixer_loss"):
+                    continue
+                overrides[key] = value
+    base.update(overrides)
+    return base
 
 
 def _make_jittered_views(
@@ -347,7 +382,9 @@ def optimize_gaussians(
     bg_mask = compute_background_mask(means, raw_views[0])
     fg_mask = ~bg_mask
 
-    _clamp_scales(scales.data, cfg.sigma_min, fg_mask)
+    initial_phase_loss = _resolve_phase_loss(cfg, "phase0")
+    initial_sigma_min = float(initial_phase_loss["sigma_min"])
+    _clamp_scales(scales.data, initial_sigma_min, fg_mask)
     merge_cfg = MergeConfig(
         every=cfg.merge_every,
         voxel_size=cfg.merge_voxel_size,
@@ -392,18 +429,34 @@ def optimize_gaussians(
     phase2_cams = all_cams[: max(1, min(cfg.phase2_cam_count, len(all_cams)))]
 
     phases = [
-        ("raw", cfg.raw_steps, phase1_cams, cfg.phase1_jitter_cm),
-        ("mix", cfg.phase2_steps, phase2_cams, cfg.phase2_jitter_cm),
-        ("mix", cfg.phase3_steps, all_cams, cfg.phase3_jitter_cm),
+        ("phase1", "raw", cfg.raw_steps, phase1_cams, cfg.phase1_jitter_cm),
+        ("phase2", "mix", cfg.phase2_steps, phase2_cams, cfg.phase2_jitter_cm),
+        ("phase3", "mix", cfg.phase3_steps, all_cams, cfg.phase3_jitter_cm),
     ]
 
     global_step = 0
     rng = random.Random(cfg.random_seed)
-    for phase_name, steps, cam_indices, jitter_cm in phases:
+    for phase_id, phase_mode, steps, cam_indices, jitter_cm in phases:
         if steps <= 0:
             continue
+        phase_loss_cfg = _resolve_phase_loss(cfg, phase_id)
+        phase_sigma_min = float(phase_loss_cfg["sigma_min"])
+        lambda_raw = float(phase_loss_cfg["photometric_loss_weight"])
+        lambda_fix = float(phase_loss_cfg["fixer_loss_weight"])
+        lambda_sigma = float(phase_loss_cfg["lambda_sigma"])
+        fixer_loss.set_config(
+            FixerLossConfig(
+                danger_percentile=float(phase_loss_cfg["danger_percentile"]),
+                blur_sigma=float(phase_loss_cfg["blur_sigma"]),
+                gamma=float(phase_loss_cfg["gamma"]),
+                lambda_fix_low=float(phase_loss_cfg["lambda_fix_low"]),
+                lambda_fix_lpips=float(phase_loss_cfg["lambda_fix_lpips"]),
+                use_lpips=cfg.use_lpips,
+                lpips_net=cfg.lpips_net,
+            )
+        )
         print(
-            f"[optimize] phase={phase_name} steps={steps} cams={cam_indices} "
+            f"[optimize] phase={phase_id} steps={steps} cams={cam_indices} "
             f"jitter_cm={jitter_cm} per_cam={cfg.jitter_views_per_cam}"
         )
         raw_subset = _select_views(raw_views, cam_indices, kind="raw")
@@ -411,11 +464,11 @@ def optimize_gaussians(
         raw_subset = raw_subset + _make_jittered_views(
             raw_subset, jitter_cm, cfg.jitter_views_per_cam, rng
         )
-        progress = tqdm(range(steps), desc=f"optimize/{phase_name}", leave=False)
+        progress = tqdm(range(steps), desc=f"optimize/{phase_id}", leave=False)
         last_view = None
         for _ in progress:
             global_step += 1
-            if phase_name == "raw" or not fixer_subset:
+            if phase_mode == "raw" or not fixer_subset:
                 view = random.choice(raw_subset)
             else:
                 if random.random() < cfg.fixer_ratio and fixer_subset:
@@ -451,10 +504,10 @@ def optimize_gaussians(
                 diff = rendered - view["rgb"]
                 loss_raw = charbonnier(diff)
                 loss_raw = torch.mean(loss_raw, dim=0, keepdim=True)
-                loss_raw_val = masked_mean(loss_raw, mask)
+                loss_raw_val = masked_mean(loss_raw, mask) * lambda_raw
                 loss = loss_raw_val
             else:
-                loss_fix_val = cfg.lambda_fix * fixer_loss(
+                loss_fix_val = lambda_fix * fixer_loss(
                     rendered,
                     view["fixer_rgb"],
                     view["input_render"],
@@ -462,11 +515,11 @@ def optimize_gaussians(
                 )
                 loss = loss_fix_val
 
-            if cfg.lambda_sigma > 0:
-                sigma_loss = F.relu(cfg.sigma_min - scales).pow(2.0)
+            if lambda_sigma > 0:
+                sigma_loss = F.relu(phase_sigma_min - scales).pow(2.0)
                 if torch.any(fg_mask):
                     sigma_loss = sigma_loss[fg_mask].mean()
-                    loss_sigma_val = cfg.lambda_sigma * sigma_loss
+                    loss_sigma_val = lambda_sigma * sigma_loss
                     loss = loss + loss_sigma_val
 
             for opt in optimizers.values():
@@ -485,12 +538,12 @@ def optimize_gaussians(
                 opt.step(visibility=visibility)
 
             rotations.data = _normalize_rotations(rotations.data)
-            _clamp_scales(scales.data, cfg.sigma_min, fg_mask)
+            _clamp_scales(scales.data, phase_sigma_min, fg_mask)
             _clamp_opacities(opacities.data)
 
             if cfg.log_every > 0 and global_step % cfg.log_every == 0:
                 message = (
-                    f"[optimize] step={global_step} phase={phase_name} "
+                    f"[optimize] step={global_step} phase={phase_id} "
                     f"type={view['type']} loss={loss.item():.6f} "
                     f"raw={loss_raw_val.item():.6f} fix={loss_fix_val.item():.6f} "
                     f"sigma={loss_sigma_val.item():.6f} "
@@ -560,7 +613,7 @@ def optimize_gaussians(
         if last_view is not None:
             _save_debug_snapshot(
                 cfg,
-                phase_name,
+                phase_id,
                 global_step,
                 last_view,
                 means,
@@ -570,7 +623,7 @@ def optimize_gaussians(
                 shs,
             )
             print(
-                f"[optimize] saved debug snapshot for phase={phase_name} "
+                f"[optimize] saved debug snapshot for phase={phase_id} "
                 f"step={global_step}"
             )
 
