@@ -12,9 +12,9 @@ phase_settings:
     fixer_view_use_ratio: 0.0
     minscale_loss:
       weight: 0.2
-      min_scale: 0.01
+      min_scale: 0.001
       max_scale: 0.04
-      min_weight: 0.2
+      min_weight: 0.1
       max_weight: 10.0
     opacity_sparsity_loss:
       weight: 0.001
@@ -65,11 +65,12 @@ phase_settings:
       gamma: 5.0
     jitter_cm: 5.0
 merge:
-  every: 800
+  every: 1000
   voxel_size: 0.02
   small_scale: 0.015
   thin_opacity: 0.03
   color_bin: 0.03
+  min_distance: 15.0
 background_freeze_steps: null
 background_remove_step: null
 log_every: 50

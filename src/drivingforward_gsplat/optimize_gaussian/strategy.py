@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Optional, Tuple
 
 import torch
 
@@ -13,6 +13,7 @@ class MergeConfig:
     small_scale: float = 0.02
     thin_opacity: float = 0.05
     color_bin: float = 0.1
+    min_distance: Optional[float] = None
 
 
 def _weighted_merge(
@@ -38,6 +39,7 @@ def merge_gaussians(
     shs: torch.Tensor,
     bg_mask: torch.Tensor,
     cfg: MergeConfig,
+    camera_center: Optional[torch.Tensor] = None,
 ) -> Tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
 ]:
@@ -48,6 +50,16 @@ def merge_gaussians(
     small = scales.min(dim=1).values < cfg.small_scale
     thin = opacities.squeeze(-1) < cfg.thin_opacity
     merge_mask = fg_mask & (small | thin)
+    if (
+        merge_mask.any()
+        and cfg.min_distance is not None
+        and cfg.min_distance > 0
+        and camera_center is not None
+    ):
+        distances = torch.linalg.norm(
+            means - camera_center.to(device=means.device, dtype=means.dtype), dim=1
+        )
+        merge_mask = merge_mask & (distances >= cfg.min_distance)
     if not torch.any(merge_mask):
         return means, rotations, scales, opacities, shs, bg_mask
 

@@ -101,6 +101,11 @@ def _clamp_opacities(opacities: torch.Tensor) -> None:
     opacities.clamp_(1e-4, 1.0 - 1e-4)
 
 
+def _camera_center_from_view(view: Dict) -> torch.Tensor:
+    world_view = view["world_view_transform"]
+    return world_view.inverse()[3, :3]
+
+
 def _select_views(
     views: List[Dict],
     cam_indices: List[int],
@@ -505,13 +510,13 @@ def optimize_gaussians(
                 if torch.any(fg_mask):
                     loss_sigma_val = torch.tensor(0.0, device=device)
                     if min_loss is not None:
-                        loss_sigma_val = loss_sigma_val + lambda_sigma_min * min_loss[
-                            fg_mask
-                        ].mean()
+                        loss_sigma_val = (
+                            loss_sigma_val + lambda_sigma_min * min_loss[fg_mask].mean()
+                        )
                     if max_loss is not None:
-                        loss_sigma_val = loss_sigma_val + lambda_sigma_max * max_loss[
-                            fg_mask
-                        ].mean()
+                        loss_sigma_val = (
+                            loss_sigma_val + lambda_sigma_max * max_loss[fg_mask].mean()
+                        )
                     loss = loss + loss_sigma_val
 
             if opacity_sparsity_weight > 0:
@@ -571,6 +576,9 @@ def optimize_gaussians(
                 )
 
             if cfg.merge.every > 0 and (global_step % cfg.merge.every == 0):
+                camera_center = None
+                if merge_cfg.min_distance is not None and merge_cfg.min_distance > 0:
+                    camera_center = _camera_center_from_view(view)
                 (
                     new_means,
                     new_rots,
@@ -586,6 +594,7 @@ def optimize_gaussians(
                     shs.data,
                     bg_mask,
                     merge_cfg,
+                    camera_center=camera_center,
                 )
                 means = torch.nn.Parameter(new_means)
                 rotations = torch.nn.Parameter(new_rots)

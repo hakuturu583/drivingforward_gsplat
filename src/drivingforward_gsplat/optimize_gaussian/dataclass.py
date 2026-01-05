@@ -78,15 +78,18 @@ class MergeStrategyConfig:
     small_scale: float = 0.02
     thin_opacity: float = 0.05
     color_bin: float = 0.1
+    min_distance: Optional[float] = None
 
     @classmethod
     def from_dict(cls, data: Dict) -> "MergeStrategyConfig":
+        min_distance = data.get("min_distance", cls.min_distance)
         return cls(
             every=int(data.get("every", cls.every)),
             voxel_size=float(data.get("voxel_size", cls.voxel_size)),
             small_scale=float(data.get("small_scale", cls.small_scale)),
             thin_opacity=float(data.get("thin_opacity", cls.thin_opacity)),
             color_bin=float(data.get("color_bin", cls.color_bin)),
+            min_distance=None if min_distance is None else float(min_distance),
         )
 
 
