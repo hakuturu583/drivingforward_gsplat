@@ -26,6 +26,24 @@ def _load_image(path: Path) -> torch.Tensor:
         return torch.from_numpy(array).permute(2, 0, 1)
 
 
+def _sam3_mask_from_render(
+    image: torch.Tensor, cfg: OptimizeGaussianConfig
+) -> torch.Tensor:
+    from drivingforward_gsplat.mask.sam3_mask import Sam3MaskConfig, cutout_with_sam3
+
+    sam3_cfg = Sam3MaskConfig(
+        model_id=cfg.sam3_model_id,
+        device=cfg.sam3_device,
+        dtype=cfg.sam3_dtype,
+        mask_threshold=cfg.sam3_mask_threshold,
+        resize_longest_side=cfg.sam3_resize_longest_side,
+    )
+    mask = cutout_with_sam3(image, cfg.sam3_prompt, sam3_cfg)
+    if cfg.sam3_invert:
+        mask = ~mask
+    return mask
+
+
 def _load_gaussians_from_ply(path: str) -> Dict[str, torch.Tensor]:
     ply = PlyData.read(path)
     data = ply["vertex"].data
@@ -85,14 +103,11 @@ def _prepare_view_entries(
     image_root: str,
 ) -> tuple[List[Dict], List[Dict]]:
     raw_images = sample[("color", 0, 0)]
-    masks = sample.get("mask")
     k_all = sample[("K", 0)]
     extrinsics = sample["extrinsics"]
 
     if isinstance(raw_images, np.ndarray):
         raw_images = torch.from_numpy(raw_images)
-    if isinstance(masks, np.ndarray):
-        masks = torch.from_numpy(masks)
     if isinstance(k_all, np.ndarray):
         k_all = torch.from_numpy(k_all)
     if isinstance(extrinsics, np.ndarray):
@@ -106,8 +121,6 @@ def _prepare_view_entries(
         return tensor
 
     raw_images = _squeeze_batch(raw_images)
-    if masks is not None:
-        masks = _squeeze_batch(masks)
     k_all = _squeeze_batch(k_all)
     extrinsics = _squeeze_batch(extrinsics)
 
@@ -120,14 +133,39 @@ def _prepare_view_entries(
     output_dir = Path(image_root) / output_token
     for cam_idx, cam_name in enumerate(CAM_ORDER):
         raw = raw_images[cam_idx].float()
-        mask = masks[cam_idx].float() if masks is not None else torch.ones_like(raw[:1])
-        mask = mask[:1]
-        mask = erode_mask(mask, cfg.sky_erode_kernel, cfg.sky_erode_iter)
         k = k_all[cam_idx]
         if k.shape[-1] == 4:
             k = k[:3, :3]
         viewmat = extrinsics_inv[cam_idx]
         world_view = viewmat.transpose(0, 1)
+
+        input_path = output_dir / f"{cam_name}_render_raw.png"
+        fixer_path = output_dir / f"{cam_name}_render.png"
+        input_render = _load_image(input_path) if input_path.exists() else None
+        fixer_rgb = _load_image(fixer_path) if fixer_path.exists() else None
+        if input_render is None:
+            raise FileNotFoundError(
+                f"Rendered image not found for SAM3 mask: {input_path}"
+            )
+        if input_render.shape[-2:] != raw.shape[-2:]:
+            input_render = torch.nn.functional.interpolate(
+                input_render.unsqueeze(0),
+                size=raw.shape[-2:],
+                mode="bilinear",
+                align_corners=False,
+            ).squeeze(0)
+        if fixer_rgb is not None and fixer_rgb.shape[-2:] != raw.shape[-2:]:
+            fixer_rgb = torch.nn.functional.interpolate(
+                fixer_rgb.unsqueeze(0),
+                size=raw.shape[-2:],
+                mode="bilinear",
+                align_corners=False,
+            ).squeeze(0)
+
+        mask_source = input_render
+        mask = _sam3_mask_from_render(mask_source, cfg)
+        mask = mask.to(dtype=torch.float32).unsqueeze(0)
+        mask = erode_mask(mask, cfg.sky_erode_kernel, cfg.sky_erode_iter)
 
         raw_views.append(
             {
@@ -144,25 +182,7 @@ def _prepare_view_entries(
             }
         )
 
-        input_path = output_dir / f"{cam_name}_render_raw.png"
-        fixer_path = output_dir / f"{cam_name}_render.png"
-        if input_path.exists() and fixer_path.exists():
-            input_render = _load_image(input_path)
-            fixer_rgb = _load_image(fixer_path)
-            if input_render.shape[-2:] != raw.shape[-2:]:
-                input_render = torch.nn.functional.interpolate(
-                    input_render.unsqueeze(0),
-                    size=raw.shape[-2:],
-                    mode="bilinear",
-                    align_corners=False,
-                ).squeeze(0)
-            if fixer_rgb.shape[-2:] != raw.shape[-2:]:
-                fixer_rgb = torch.nn.functional.interpolate(
-                    fixer_rgb.unsqueeze(0),
-                    size=raw.shape[-2:],
-                    mode="bilinear",
-                    align_corners=False,
-                ).squeeze(0)
+        if input_render is not None and fixer_rgb is not None:
             fixer_views.append(
                 {
                     "type": "fixer",

@@ -55,6 +55,13 @@ class OptimizeGaussianConfig:
     background_remove_step: Optional[int] = None
     sky_erode_kernel: int = 3
     sky_erode_iter: int = 1
+    sam3_prompt: str = "sky"
+    sam3_invert: bool = True
+    sam3_model_id: str = "facebook/sam3-huge"
+    sam3_device: str = "cuda"
+    sam3_dtype: str = "auto"
+    sam3_mask_threshold: float = 0.5
+    sam3_resize_longest_side: Optional[int] = None
     use_lpips: bool = True
     lpips_net: str = "vgg"
     background_color: List[float] = None
@@ -75,15 +82,9 @@ class OptimizeGaussianConfig:
             phase3_steps=int(data.get("phase3_steps", cls.phase3_steps)),
             phase1_cam_count=int(data.get("phase1_cam_count", cls.phase1_cam_count)),
             phase2_cam_count=int(data.get("phase2_cam_count", cls.phase2_cam_count)),
-            phase1_jitter_cm=float(
-                data.get("phase1_jitter_cm", cls.phase1_jitter_cm)
-            ),
-            phase2_jitter_cm=float(
-                data.get("phase2_jitter_cm", cls.phase2_jitter_cm)
-            ),
-            phase3_jitter_cm=float(
-                data.get("phase3_jitter_cm", cls.phase3_jitter_cm)
-            ),
+            phase1_jitter_cm=float(data.get("phase1_jitter_cm", cls.phase1_jitter_cm)),
+            phase2_jitter_cm=float(data.get("phase2_jitter_cm", cls.phase2_jitter_cm)),
+            phase3_jitter_cm=float(data.get("phase3_jitter_cm", cls.phase3_jitter_cm)),
             jitter_views_per_cam=int(
                 data.get("jitter_views_per_cam", cls.jitter_views_per_cam)
             ),
@@ -114,6 +115,17 @@ class OptimizeGaussianConfig:
             ),
             sky_erode_kernel=int(data.get("sky_erode_kernel", cls.sky_erode_kernel)),
             sky_erode_iter=int(data.get("sky_erode_iter", cls.sky_erode_iter)),
+            sam3_prompt=data.get("sam3_prompt", cls.sam3_prompt),
+            sam3_invert=bool(data.get("sam3_invert", cls.sam3_invert)),
+            sam3_model_id=data.get("sam3_model_id", cls.sam3_model_id),
+            sam3_device=data.get("sam3_device", cls.sam3_device),
+            sam3_dtype=data.get("sam3_dtype", cls.sam3_dtype),
+            sam3_mask_threshold=float(
+                data.get("sam3_mask_threshold", cls.sam3_mask_threshold)
+            ),
+            sam3_resize_longest_side=data.get(
+                "sam3_resize_longest_side", cls.sam3_resize_longest_side
+            ),
             use_lpips=bool(data.get("use_lpips", cls.use_lpips)),
             lpips_net=data.get("lpips_net", cls.lpips_net),
             background_color=data.get("background_color", cls.background_color),
