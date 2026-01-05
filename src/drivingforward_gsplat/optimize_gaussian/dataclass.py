@@ -174,7 +174,7 @@ class OptimizeGaussianConfig:
             data = yaml.safe_load(f) or {}
         if "sigma_min" in data or "lambda_sigma" in data or "min_scale" in data:
             raise ValueError(
-                "Use phase_settings.phase0.minscale_loss for min_scale/weight."
+                "Use phase_settings.<phase>.minscale_loss for min_scale/weight."
             )
         raw_phase_settings = data.get("phase_settings", {})
         raw_sky_mask = data.get("sky_mask", {})

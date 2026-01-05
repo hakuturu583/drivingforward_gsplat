@@ -169,7 +169,7 @@ def _resolve_phase_loss(
             base["max_scale"] = _apply_optional(
                 phase_cfg.minscale_loss.max_scale, base["max_scale"]
             )
-        if phase_cfg.opacity_sparsity_loss is not None and phase_id == "phase0":
+        if phase_cfg.opacity_sparsity_loss is not None:
             base["opacity_sparsity_weight"] = float(
                 phase_cfg.opacity_sparsity_loss.weight
             )
@@ -328,34 +328,16 @@ def optimize_gaussians(
     bg_mask = compute_background_mask(means, raw_views[0])
     fg_mask = ~bg_mask
 
-    initial_phase_loss = _resolve_phase_loss(cfg, "phase0")
+    initial_phase_loss = _resolve_phase_loss(cfg, "phase1")
     initial_sigma_min = float(initial_phase_loss["min_scale"])
     _clamp_scales(scales.data, initial_sigma_min, fg_mask)
+    default_jitter_views_per_cam = 4
     merge_cfg = MergeConfig(
         every=cfg.merge.every,
         voxel_size=cfg.merge.voxel_size,
         small_scale=cfg.merge.small_scale,
         thin_opacity=cfg.merge.thin_opacity,
     )
-    (
-        means.data,
-        rotations.data,
-        scales.data,
-        opacities.data,
-        shs.data,
-        bg_mask,
-    ) = merge_gaussians(
-        means.data,
-        rotations.data,
-        scales.data,
-        opacities.data,
-        shs.data,
-        bg_mask,
-        merge_cfg,
-    )
-    fg_mask = ~bg_mask
-    rotations.data = _normalize_rotations(rotations.data)
-    _clamp_opacities(opacities.data)
 
     optimizers = _prepare_optimizers(params, cfg.lr)
     fixer_loss = FixerLoss(
@@ -371,7 +353,6 @@ def optimize_gaussians(
     )
 
     all_cams = sorted({v["cam_idx"] for v in raw_views})
-    default_jitter_views_per_cam = 4
     phase1_runtime = _resolve_phase_runtime(
         cfg,
         "phase1",

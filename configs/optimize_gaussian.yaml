@@ -5,21 +5,6 @@ debug_dir_name: debug
 device: cuda
 lr: 0.005
 phase_settings:
-  phase0:
-    minscale_loss:
-      weight: 0.1
-      min_scale: 0.03
-    fixer_loss:
-      weight: 0.00
-      low_freq_weight: 1.0
-      lpips_weight: 0.1
-      use_lpips: true
-      lpips_net: vgg
-      danger_percentile: 0.25
-      blur_sigma: 1.5
-      gamma: 5.0
-    opacity_sparsity_loss:
-      weight: 0.001
   phase1:
     steps: 1000
     cam_count: 6
