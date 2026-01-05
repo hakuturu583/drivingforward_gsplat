@@ -4,6 +4,7 @@ import random
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
+import os
 import torch
 import torch.nn.functional as F
 import yaml
@@ -21,6 +22,8 @@ from drivingforward_gsplat.optimize_gaussian.strategy import (
     MergeConfig,
     merge_gaussians,
 )
+from drivingforward_gsplat.utils.gaussian_ply import save_gaussians_tensors_as_inria_ply
+from drivingforward_gsplat.utils.misc import to_pil_rgb
 
 
 @dataclass
@@ -28,6 +31,7 @@ class OptimizeGaussianConfig:
     gaussian_ply_path: Optional[str] = None
     output_dir: str = "output/gaussians"
     output_ply_name: str = "optimized.ply"
+    debug_dir_name: str = "debug"
     device: str = "cuda"
     lr: float = 5e-3
     raw_steps: int = 1000
@@ -77,6 +81,7 @@ class OptimizeGaussianConfig:
             gaussian_ply_path=data.get("gaussian_ply_path"),
             output_dir=data.get("output_dir", cls.output_dir),
             output_ply_name=data.get("output_ply_name", cls.output_ply_name),
+            debug_dir_name=data.get("debug_dir_name", cls.debug_dir_name),
             device=data.get("device", cls.device),
             lr=float(data.get("lr", cls.lr)),
             raw_steps=int(data.get("raw_steps", cls.raw_steps)),
@@ -250,6 +255,53 @@ def _make_jittered_views(
     return jittered
 
 
+def _save_debug_snapshot(
+    cfg: OptimizeGaussianConfig,
+    phase_name: str,
+    phase_step: int,
+    view: Dict,
+    means: torch.Tensor,
+    rotations: torch.Tensor,
+    scales: torch.Tensor,
+    opacities: torch.Tensor,
+    shs: torch.Tensor,
+) -> None:
+    debug_root = os.path.join(cfg.output_dir, cfg.debug_dir_name)
+    phase_dir = os.path.join(debug_root, f"phase_{phase_name}_step_{phase_step:04d}")
+    os.makedirs(phase_dir, exist_ok=True)
+
+    rendered = gs_render.render(
+        novel_FovX=0.0,
+        novel_FovY=0.0,
+        novel_height=view["height"],
+        novel_width=view["width"],
+        novel_world_view_transform=view["world_view_transform"],
+        novel_full_proj_transform=view["world_view_transform"],
+        novel_camera_center=None,
+        novel_K=view["K"],
+        pts_xyz=means,
+        pts_rgb=None,
+        rotations=rotations,
+        scales=scales,
+        opacity=opacities,
+        shs=shs,
+        bg_color=view["bg_color"],
+        with_postprocess=False,
+    )
+    image_path = os.path.join(phase_dir, "novel_view.png")
+    to_pil_rgb(rendered).save(image_path)
+
+    inria_path = os.path.join(phase_dir, "gaussians_inria.ply")
+    save_gaussians_tensors_as_inria_ply(
+        means.detach().cpu(),
+        rotations.detach().cpu(),
+        scales.detach().cpu(),
+        opacities.detach().cpu(),
+        shs.detach().cpu(),
+        inria_path,
+    )
+
+
 def optimize_gaussians(
     cfg: OptimizeGaussianConfig,
     gaussians: Dict[str, torch.Tensor],
@@ -360,6 +412,7 @@ def optimize_gaussians(
             raw_subset, jitter_cm, cfg.jitter_views_per_cam, rng
         )
         progress = tqdm(range(steps), desc=f"optimize/{phase_name}", leave=False)
+        last_view = None
         for _ in progress:
             global_step += 1
             if phase_name == "raw" or not fixer_subset:
@@ -369,6 +422,7 @@ def optimize_gaussians(
                     view = random.choice(fixer_subset)
                 else:
                     view = random.choice(raw_subset)
+            last_view = view
 
             rendered = gs_render.render(
                 novel_FovX=0.0,
@@ -500,6 +554,23 @@ def optimize_gaussians(
                 print(
                     f"[optimize] merged at step={global_step} gaussians={means.shape[0]}"
                 )
+
+        if last_view is not None:
+            _save_debug_snapshot(
+                cfg,
+                phase_name,
+                global_step,
+                last_view,
+                means,
+                rotations,
+                scales,
+                opacities,
+                shs,
+            )
+            print(
+                f"[optimize] saved debug snapshot for phase={phase_name} "
+                f"step={global_step}"
+            )
 
     return {
         "means": means.data.detach().cpu(),

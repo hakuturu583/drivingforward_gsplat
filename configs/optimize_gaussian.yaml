@@ -1,6 +1,7 @@
 gaussian_ply_path: null
 output_dir: output/gaussians
 output_ply_name: optimized.ply
+debug_dir_name: debug
 device: cuda
 lr: 0.005
 raw_steps: 1000
