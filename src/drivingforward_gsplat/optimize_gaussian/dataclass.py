@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 import yaml
@@ -145,11 +145,11 @@ class OptimizeGaussianConfig:
     debug_dir_name: str = "debug"
     device: str = "cuda"
     lr: float = 5e-3
-    merge: MergeStrategyConfig = MergeStrategyConfig()
+    merge: MergeStrategyConfig = field(default_factory=MergeStrategyConfig)
     background_freeze_steps: Optional[int] = 500
     background_remove_step: Optional[int] = None
     log_every: int = 50
-    sky_mask: SkyMaskConfig = SkyMaskConfig()
+    sky_mask: SkyMaskConfig = field(default_factory=SkyMaskConfig)
     background_color: List[float] = None
     random_seed: int = 0
     phase_settings: Optional[Dict[str, PhaseConfig]] = None
