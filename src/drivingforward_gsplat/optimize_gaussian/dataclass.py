@@ -43,6 +43,7 @@ class OpacitySparsityLossConfig(LossConfig):
 @dataclass
 class ScaleRatioLossConfig(LossConfig):
     max_ratio: Optional[float] = None
+    gamma: Optional[float] = None
 
 
 @dataclass
@@ -159,6 +160,7 @@ class PhaseConfig:
             scale_ratio_loss=ScaleRatioLossConfig(
                 weight=scale_ratio["weight"],
                 max_ratio=scale_ratio.get("max_ratio"),
+                gamma=scale_ratio.get("gamma"),
             )
             if isinstance(scale_ratio, dict) and "weight" in scale_ratio
             else None,

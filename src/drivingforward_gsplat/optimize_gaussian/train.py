@@ -139,6 +139,7 @@ def _resolve_phase_loss(
         "opacity_sparsity_weight": 0.0,
         "scale_ratio_weight": 0.0,
         "scale_ratio_max": 2.0,
+        "scale_ratio_gamma": 2.0,
         "danger_percentile": 0.25,
         "blur_sigma": 1.5,
         "gamma": 5.0,
@@ -192,6 +193,9 @@ def _resolve_phase_loss(
             base["scale_ratio_weight"] = float(phase_cfg.scale_ratio_loss.weight)
             base["scale_ratio_max"] = _apply_optional(
                 phase_cfg.scale_ratio_loss.max_ratio, base["scale_ratio_max"]
+            )
+            base["scale_ratio_gamma"] = _apply_optional(
+                phase_cfg.scale_ratio_loss.gamma, base["scale_ratio_gamma"]
             )
         base["jitter_cm"] = _apply_optional(phase_cfg.jitter_cm, base["jitter_cm"])
     return base
@@ -436,6 +440,7 @@ def optimize_gaussians(
         opacity_sparsity_weight = float(phase_loss_cfg["opacity_sparsity_weight"])
         scale_ratio_weight = float(phase_loss_cfg["scale_ratio_weight"])
         scale_ratio_max = float(phase_loss_cfg["scale_ratio_max"])
+        scale_ratio_gamma = float(phase_loss_cfg["scale_ratio_gamma"])
         jitter_cm = float(phase_loss_cfg.get("jitter_cm", 0.0))
         jitter_views_per_cam = int(runtime["jitter_views_per_cam"])
         fixer_loss.set_config(
@@ -536,7 +541,8 @@ def optimize_gaussians(
                 max_scale = scales.max(dim=1).values
                 min_scale = scales.min(dim=1).values.clamp_min(1e-6)
                 ratio = max_scale / min_scale
-                ratio_loss = F.relu(ratio - scale_ratio_max).pow(2.0)
+                excess = F.relu(ratio - scale_ratio_max)
+                ratio_loss = torch.exp(scale_ratio_gamma * excess).clamp_max(1e6) - 1.0
                 if torch.any(fg_mask):
                     ratio_loss = ratio_loss[fg_mask].mean()
                     loss = loss + scale_ratio_weight * ratio_loss
