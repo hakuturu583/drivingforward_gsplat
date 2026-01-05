@@ -46,4 +46,4 @@ uv run python -m drivingforward_gsplat.predict_gaussian \
   --optimize-gaussian-config configs/optimize_gaussian.yaml
 ```
 
-This runs prediction, then optimizes the exported gaussians with gsplat using raw NuScenes views as anchors and Fixer outputs as regularization. Sky masks are excluded from losses and merge/densify, and Fixer is weighted lightly to avoid overfitting. Update `configs/optimize_gaussian.yaml` to tune view counts per phase, merge frequency, sigma minimums, and Fixer weights.
+This runs prediction, then optimizes the exported gaussians with gsplat using raw NuScenes views as anchors and Fixer outputs as regularization. Sky masks are excluded from losses and merge/densify, and Fixer is weighted lightly to avoid overfitting. Update `configs/optimize_gaussian.yaml` to tune view counts per phase, merge frequency, sigma minimums, Fixer weights, and the per-phase camera jitter range (cm) used for viewpoint robustness.

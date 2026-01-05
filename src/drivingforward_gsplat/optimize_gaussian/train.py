@@ -34,6 +34,10 @@ class OptimizeGaussianConfig:
     phase3_steps: int = 1000
     phase1_cam_count: int = 2
     phase2_cam_count: int = 4
+    phase1_jitter_cm: float = 1.0
+    phase2_jitter_cm: float = 3.0
+    phase3_jitter_cm: float = 5.0
+    jitter_views_per_cam: int = 4
     fixer_ratio: float = 0.33
     danger_percentile: float = 0.25
     lambda_fix: float = 0.02
@@ -71,6 +75,18 @@ class OptimizeGaussianConfig:
             phase3_steps=int(data.get("phase3_steps", cls.phase3_steps)),
             phase1_cam_count=int(data.get("phase1_cam_count", cls.phase1_cam_count)),
             phase2_cam_count=int(data.get("phase2_cam_count", cls.phase2_cam_count)),
+            phase1_jitter_cm=float(
+                data.get("phase1_jitter_cm", cls.phase1_jitter_cm)
+            ),
+            phase2_jitter_cm=float(
+                data.get("phase2_jitter_cm", cls.phase2_jitter_cm)
+            ),
+            phase3_jitter_cm=float(
+                data.get("phase3_jitter_cm", cls.phase3_jitter_cm)
+            ),
+            jitter_views_per_cam=int(
+                data.get("jitter_views_per_cam", cls.jitter_views_per_cam)
+            ),
             fixer_ratio=float(data.get("fixer_ratio", cls.fixer_ratio)),
             danger_percentile=float(
                 data.get("danger_percentile", cls.danger_percentile)
@@ -189,6 +205,36 @@ def _select_views(
     return [v for v in filtered if v["type"] == kind]
 
 
+def _make_jittered_views(
+    views: List[Dict],
+    jitter_cm: float,
+    per_view: int,
+    rng: random.Random,
+) -> List[Dict]:
+    if jitter_cm <= 0 or per_view <= 0:
+        return []
+    jitter_m = jitter_cm / 100.0
+    jittered: List[Dict] = []
+    for view in views:
+        viewmat = view["viewmat"]
+        for _ in range(per_view):
+            dx = rng.uniform(-jitter_m, jitter_m)
+            dz = rng.uniform(-jitter_m, jitter_m)
+            offset = torch.tensor(
+                [dx, 0.0, dz],
+                device=viewmat.device,
+                dtype=viewmat.dtype,
+            )
+            new_viewmat = viewmat.clone()
+            new_viewmat[:3, 3] = new_viewmat[:3, 3] + offset
+            new_world_view = new_viewmat.transpose(0, 1)
+            jittered_view = dict(view)
+            jittered_view["viewmat"] = new_viewmat
+            jittered_view["world_view_transform"] = new_world_view
+            jittered.append(jittered_view)
+    return jittered
+
+
 def optimize_gaussians(
     cfg: OptimizeGaussianConfig,
     gaussians: Dict[str, torch.Tensor],
@@ -279,17 +325,21 @@ def optimize_gaussians(
     phase2_cams = all_cams[: max(1, min(cfg.phase2_cam_count, len(all_cams)))]
 
     phases = [
-        ("raw", cfg.raw_steps, phase1_cams),
-        ("mix", cfg.phase2_steps, phase2_cams),
-        ("mix", cfg.phase3_steps, all_cams),
+        ("raw", cfg.raw_steps, phase1_cams, cfg.phase1_jitter_cm),
+        ("mix", cfg.phase2_steps, phase2_cams, cfg.phase2_jitter_cm),
+        ("mix", cfg.phase3_steps, all_cams, cfg.phase3_jitter_cm),
     ]
 
     global_step = 0
-    for phase_name, steps, cam_indices in phases:
+    rng = random.Random(cfg.random_seed)
+    for phase_name, steps, cam_indices, jitter_cm in phases:
         if steps <= 0:
             continue
         raw_subset = _select_views(raw_views, cam_indices, kind="raw")
         fixer_subset = _select_views(fixer_views, cam_indices, kind="fixer")
+        raw_subset = raw_subset + _make_jittered_views(
+            raw_subset, jitter_cm, cfg.jitter_views_per_cam, rng
+        )
         for _ in range(steps):
             global_step += 1
             if phase_name == "raw" or not fixer_subset:
