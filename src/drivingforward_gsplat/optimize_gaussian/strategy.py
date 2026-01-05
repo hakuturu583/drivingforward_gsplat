@@ -10,9 +10,9 @@ import torch
 class MergeConfig:
     every: int = 200
     voxel_size: float = 0.05
+    voxel_size_distance_scale: float = 0.0
     small_scale: float = 0.02
     color_bin: float = 0.1
-    min_distance: Optional[float] = None
     prune_thin_opacity: Optional[float] = None
 
 
@@ -53,16 +53,6 @@ def merge_gaussians(
     if cfg.prune_thin_opacity is not None and cfg.prune_thin_opacity > 0:
         prune_mask = fg_mask & (opacities.squeeze(-1) < cfg.prune_thin_opacity)
         merge_mask = merge_mask & ~prune_mask
-    if (
-        merge_mask.any()
-        and cfg.min_distance is not None
-        and cfg.min_distance > 0
-        and camera_center is not None
-    ):
-        distances = torch.linalg.norm(
-            means - camera_center.to(device=means.device, dtype=means.dtype), dim=1
-        )
-        merge_mask = merge_mask & (distances >= cfg.min_distance)
     if not torch.any(merge_mask) and not torch.any(prune_mask):
         return means, rotations, scales, opacities, shs, bg_mask
 
@@ -71,7 +61,22 @@ def merge_gaussians(
 
     if merge_idx.numel() > 0:
         merge_means = means[merge_idx]
-        voxels = torch.floor(merge_means / cfg.voxel_size).to(torch.int32)
+        if (
+            camera_center is not None
+            and cfg.voxel_size_distance_scale is not None
+            and cfg.voxel_size_distance_scale > 0
+        ):
+            distances = torch.linalg.norm(
+                merge_means - camera_center.to(device=means.device, dtype=means.dtype),
+                dim=1,
+            )
+            voxel_sizes = cfg.voxel_size * (
+                1.0 + distances * cfg.voxel_size_distance_scale
+            )
+            voxel_sizes = voxel_sizes.clamp_min(1e-6).unsqueeze(1)
+            voxels = torch.floor(merge_means / voxel_sizes).to(torch.int32)
+        else:
+            voxels = torch.floor(merge_means / cfg.voxel_size).to(torch.int32)
         if cfg.color_bin > 0:
             base_color = shs[merge_idx][:, 0, :].clamp(0.0, 1.0)
             color_bins = torch.floor(base_color / cfg.color_bin).to(torch.int32)
