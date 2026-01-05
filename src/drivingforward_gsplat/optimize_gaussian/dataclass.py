@@ -143,9 +143,6 @@ class OptimizeGaussianConfig:
     device: str = "cuda"
     lr: float = 5e-3
     fixer_ratio: float = 0.33
-    danger_percentile: float = 0.25
-    blur_sigma: float = 1.5
-    gamma: float = 5.0
     lambda_sigma: float = 0.1
     sigma_min: float = 0.03
     merge: MergeStrategyConfig = MergeStrategyConfig()
@@ -183,11 +180,6 @@ class OptimizeGaussianConfig:
             device=data.get("device", cls.device),
             lr=float(data.get("lr", cls.lr)),
             fixer_ratio=float(data.get("fixer_ratio", cls.fixer_ratio)),
-            danger_percentile=float(
-                data.get("danger_percentile", cls.danger_percentile)
-            ),
-            blur_sigma=float(data.get("blur_sigma", cls.blur_sigma)),
-            gamma=float(data.get("gamma", cls.gamma)),
             lambda_sigma=float(data.get("lambda_sigma", cls.lambda_sigma)),
             sigma_min=float(data.get("sigma_min", cls.sigma_min)),
             merge=merge,

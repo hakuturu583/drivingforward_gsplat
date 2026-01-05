@@ -129,9 +129,9 @@ def _resolve_phase_loss(
         "fixer_lpips_net": "vgg",
         "lambda_sigma": cfg.lambda_sigma,
         "sigma_min": cfg.sigma_min,
-        "danger_percentile": cfg.danger_percentile,
-        "blur_sigma": cfg.blur_sigma,
-        "gamma": cfg.gamma,
+        "danger_percentile": 0.25,
+        "blur_sigma": 1.5,
+        "gamma": 5.0,
         "jitter_cm": 0.0,
     }
     if cfg.phase_settings and phase_id in cfg.phase_settings:
