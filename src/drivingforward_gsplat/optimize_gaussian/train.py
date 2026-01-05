@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, List, Optional
 
 import torch
 import torch.nn.functional as F
 import yaml
+from gsplat.optimizers import SelectiveAdam
 
 from drivingforward_gsplat.models.gaussian import rendering as gs_render
-from drivingforward_gsplat.optimize_gaussian.freeze import zero_grad_for_indices
 from drivingforward_gsplat.optimize_gaussian.losses import (
     FixerLoss,
     FixerLossConfig,
@@ -150,10 +150,16 @@ def compute_background_mask(
     return bg
 
 
-def _prepare_optimizer(
-    params: Iterable[torch.nn.Parameter], lr: float
-) -> torch.optim.Optimizer:
-    return torch.optim.Adam(params, lr=lr)
+def _prepare_optimizers(
+    params: Dict[str, torch.nn.Parameter], lr: float
+) -> Dict[str, torch.optim.Optimizer]:
+    optimizers: Dict[str, torch.optim.Optimizer] = {}
+    for name, param in params.items():
+        opt = SelectiveAdam([param], eps=1e-8, betas=(0.9, 0.999))
+        for group in opt.param_groups:
+            group["lr"] = lr
+        optimizers[name] = opt
+    return optimizers
 
 
 def _normalize_rotations(rotations: torch.Tensor) -> torch.Tensor:
@@ -217,6 +223,13 @@ def optimize_gaussians(
     scales = torch.nn.Parameter(gaussians["scales"].to(device))
     opacities = torch.nn.Parameter(gaussians["opacities"].to(device))
     shs = torch.nn.Parameter(gaussians["shs"].to(device))
+    params = {
+        "means": means,
+        "quats": rotations,
+        "scales": scales,
+        "opacities": opacities,
+        "shs": shs,
+    }
 
     bg_mask = compute_background_mask(means, raw_views[0])
     fg_mask = ~bg_mask
@@ -248,7 +261,7 @@ def optimize_gaussians(
     rotations.data = _normalize_rotations(rotations.data)
     _clamp_opacities(opacities.data)
 
-    optimizer = _prepare_optimizer([means, rotations, scales, opacities, shs], cfg.lr)
+    optimizers = _prepare_optimizers(params, cfg.lr)
     fixer_loss = FixerLoss(
         FixerLossConfig(
             danger_percentile=cfg.danger_percentile,
@@ -326,16 +339,18 @@ def optimize_gaussians(
                     sigma_loss = sigma_loss[fg_mask].mean()
                     loss = loss + cfg.lambda_sigma * sigma_loss
 
-            optimizer.zero_grad(set_to_none=True)
+            for opt in optimizers.values():
+                opt.zero_grad(set_to_none=True)
             loss.backward()
             if (
                 cfg.background_freeze_steps > 0
                 and global_step <= cfg.background_freeze_steps
             ):
-                zero_grad_for_indices(
-                    [means, rotations, scales, opacities, shs], bg_mask
-                )
-            optimizer.step()
+                visibility = fg_mask.to(dtype=means.dtype)
+            else:
+                visibility = torch.ones_like(fg_mask, dtype=means.dtype)
+            for opt in optimizers.values():
+                opt.step(visibility=visibility)
 
             rotations.data = _normalize_rotations(rotations.data)
             _clamp_scales(scales.data, cfg.sigma_min, fg_mask)
@@ -350,17 +365,22 @@ def optimize_gaussians(
                 shs = torch.nn.Parameter(shs.data[keep])
                 bg_mask = torch.zeros(means.shape[0], dtype=torch.bool, device=device)
                 fg_mask = ~bg_mask
-                optimizer = _prepare_optimizer(
-                    [means, rotations, scales, opacities, shs], cfg.lr
-                )
+                params = {
+                    "means": means,
+                    "quats": rotations,
+                    "scales": scales,
+                    "opacities": opacities,
+                    "shs": shs,
+                }
+                optimizers = _prepare_optimizers(params, cfg.lr)
 
             if cfg.merge_every > 0 and (global_step % cfg.merge_every == 0):
                 (
-                    means.data,
-                    rotations.data,
-                    scales.data,
-                    opacities.data,
-                    shs.data,
+                    new_means,
+                    new_rots,
+                    new_scales,
+                    new_opacities,
+                    new_shs,
                     bg_mask,
                 ) = merge_gaussians(
                     means.data,
@@ -371,11 +391,21 @@ def optimize_gaussians(
                     bg_mask,
                     merge_cfg,
                 )
+                means = torch.nn.Parameter(new_means)
+                rotations = torch.nn.Parameter(new_rots)
+                scales = torch.nn.Parameter(new_scales)
+                opacities = torch.nn.Parameter(new_opacities)
+                shs = torch.nn.Parameter(new_shs)
                 fg_mask = ~bg_mask
                 rotations.data = _normalize_rotations(rotations.data)
-                optimizer = _prepare_optimizer(
-                    [means, rotations, scales, opacities, shs], cfg.lr
-                )
+                params = {
+                    "means": means,
+                    "quats": rotations,
+                    "scales": scales,
+                    "opacities": opacities,
+                    "shs": shs,
+                }
+                optimizers = _prepare_optimizers(params, cfg.lr)
 
     return {
         "means": means.data.detach().cpu(),

@@ -7,8 +7,9 @@ from typing import Dict, List
 
 import numpy as np
 import torch
+from gsplat import exporter
 from PIL import Image
-from plyfile import PlyData, PlyElement
+from plyfile import PlyData
 
 from drivingforward_gsplat.predict_gaussian import CAM_ORDER
 from drivingforward_gsplat.optimize_gaussian.train import (
@@ -54,46 +55,27 @@ def _load_gaussians_from_ply(path: str) -> Dict[str, torch.Tensor]:
 
 
 def _save_gaussians_to_ply(path: str, gaussians: Dict[str, torch.Tensor]) -> None:
-    means = gaussians["means"].cpu().numpy().astype(np.float32)
-    rotations = gaussians["rotations"].cpu().numpy().astype(np.float32)
-    scales = gaussians["scales"].cpu().numpy().astype(np.float32)
-    opacities = gaussians["opacities"].cpu().numpy().astype(np.float32)
-    shs = gaussians["shs"].cpu().numpy().astype(np.float32)
-    shs = shs.reshape(shs.shape[0], -1)
-
-    num = means.shape[0]
-    sh_dim = shs.shape[1]
-    dtype_fields = [
-        ("x", "f4"),
-        ("y", "f4"),
-        ("z", "f4"),
-        ("rot_0", "f4"),
-        ("rot_1", "f4"),
-        ("rot_2", "f4"),
-        ("rot_3", "f4"),
-        ("scale_0", "f4"),
-        ("scale_1", "f4"),
-        ("scale_2", "f4"),
-        ("opacity", "f4"),
-    ] + [(f"sh_{idx}", "f4") for idx in range(sh_dim)]
-
-    data = np.zeros(num, dtype=dtype_fields)
-    data["x"] = means[:, 0]
-    data["y"] = means[:, 1]
-    data["z"] = means[:, 2]
-    data["rot_0"] = rotations[:, 0]
-    data["rot_1"] = rotations[:, 1]
-    data["rot_2"] = rotations[:, 2]
-    data["rot_3"] = rotations[:, 3]
-    data["scale_0"] = scales[:, 0]
-    data["scale_1"] = scales[:, 1]
-    data["scale_2"] = scales[:, 2]
-    data["opacity"] = opacities[:, 0]
-    for idx in range(sh_dim):
-        data[f"sh_{idx}"] = shs[:, idx]
+    means = gaussians["means"].detach().cpu()
+    rotations = gaussians["rotations"].detach().cpu()
+    scales = gaussians["scales"].detach().cpu()
+    opacities = gaussians["opacities"].detach().cpu().squeeze(-1)
+    shs = gaussians["shs"].detach().cpu()
+    sh0 = shs[:, :1, :]
+    shN = shs[:, 1:, :]
+    if shN.numel() == 0:
+        shN = shs.new_zeros((shs.shape[0], 0, 3))
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    PlyData([PlyElement.describe(data, "vertex")], text=False).write(path)
+    exporter.export_splats(
+        means=means,
+        scales=scales,
+        quats=rotations,
+        opacities=opacities,
+        sh0=sh0,
+        shN=shN,
+        format="ply",
+        save_to=path,
+    )
 
 
 def _prepare_view_entries(
