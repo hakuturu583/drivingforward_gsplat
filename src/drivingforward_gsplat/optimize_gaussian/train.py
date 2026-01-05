@@ -57,7 +57,7 @@ class OptimizeGaussianConfig:
     sky_erode_iter: int = 1
     sam3_prompt: str = "sky"
     sam3_invert: bool = True
-    sam3_model_id: str = "facebook/sam3-huge"
+    sam3_model_id: str = "facebook/sam3"
     sam3_device: str = "cuda"
     sam3_dtype: str = "auto"
     sam3_mask_threshold: float = 0.5

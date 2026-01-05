@@ -42,12 +42,12 @@ def _resolve_dtype(dtype: str, device: torch.device) -> torch.dtype:
 def _load_sam3_components(
     model_id: str, device_str: str, dtype_str: str
 ) -> Tuple[object, torch.nn.Module]:
-    from transformers import AutoModelForMaskGeneration, AutoProcessor
+    from transformers import Sam3Model, Sam3Processor
 
     device = _resolve_device(device_str)
     dtype = _resolve_dtype(dtype_str, device)
-    processor = AutoProcessor.from_pretrained(model_id)
-    model = AutoModelForMaskGeneration.from_pretrained(model_id, torch_dtype=dtype)
+    processor = Sam3Processor.from_pretrained(model_id)
+    model = Sam3Model.from_pretrained(model_id, torch_dtype=dtype)
     model.to(device)
     model.eval()
     return processor, model
@@ -71,7 +71,13 @@ def cutout_with_sam3(
     device = _resolve_device(cfg.device)
     images = [pil_image]
     if prompt:
-        inputs = processor(images=images, text=[prompt], return_tensors="pt")
+        try:
+            inputs = processor(images=images, text=[prompt], return_tensors="pt")
+        except TypeError as exc:
+            raise TypeError(
+                "SAM3 processor does not accept text prompts. "
+                "Set sam3_prompt to empty or switch to a text-capable SAM3 processor."
+            ) from exc
     else:
         inputs = processor(images=images, return_tensors="pt")
     inputs = {key: value.to(device) for key, value in inputs.items()}
