@@ -31,6 +31,8 @@ class FixerLossConfig(LossConfig):
 class MinScaleLossConfig(LossConfig):
     min_scale: Optional[float] = None
     max_scale: Optional[float] = None
+    min_weight: Optional[float] = None
+    max_weight: Optional[float] = None
 
 
 @dataclass
@@ -134,6 +136,8 @@ class PhaseConfig:
                 weight=minscale["weight"],
                 min_scale=minscale.get("min_scale"),
                 max_scale=minscale.get("max_scale"),
+                min_weight=minscale.get("min_weight"),
+                max_weight=minscale.get("max_weight"),
             )
             if isinstance(minscale, dict) and "weight" in minscale
             else None,
