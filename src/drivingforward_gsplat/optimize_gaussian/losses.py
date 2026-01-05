@@ -52,18 +52,18 @@ def blur_image(image: torch.Tensor, sigma: float) -> torch.Tensor:
 
 
 @dataclass
-class FixerLossConfig:
+class FixerLossParams:
     danger_percentile: float = 0.25
     blur_sigma: float = 1.5
     gamma: float = 5.0
-    lambda_fix_low: float = 1.0
-    lambda_fix_lpips: float = 0.1
+    low_freq_weight: float = 1.0
+    lpips_weight: float = 0.1
     use_lpips: bool = True
     lpips_net: str = "vgg"
 
 
 class FixerLoss:
-    def __init__(self, cfg: FixerLossConfig) -> None:
+    def __init__(self, cfg: FixerLossParams) -> None:
         self.cfg = cfg
         self._lpips = None
         self._lpips_warned = False
@@ -75,7 +75,7 @@ class FixerLoss:
             except Exception:
                 self._lpips = None
 
-    def set_config(self, cfg: FixerLossConfig) -> None:
+    def set_config(self, cfg: FixerLossParams) -> None:
         self.cfg = cfg
         if cfg.use_lpips and self._lpips is None:
             try:
@@ -150,6 +150,4 @@ class FixerLoss:
                 lpips_val = self._lpips(rendered_lp.unsqueeze(0), fixer_lp.unsqueeze(0))
                 lpips_loss = lpips_val.mean()
 
-        return (
-            self.cfg.lambda_fix_low * low_loss + self.cfg.lambda_fix_lpips * lpips_loss
-        )
+        return self.cfg.low_freq_weight * low_loss + self.cfg.lpips_weight * lpips_loss

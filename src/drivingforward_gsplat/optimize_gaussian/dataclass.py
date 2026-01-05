@@ -7,6 +7,76 @@ import yaml
 
 
 @dataclass
+class LossConfig:
+    weight: float
+
+
+@dataclass
+class PhotometricLossConfig(LossConfig):
+    pass
+
+
+@dataclass
+class FixerLossConfig(LossConfig):
+    low_freq_weight: float = 1.0
+    lpips_weight: float = 0.1
+    danger_percentile: Optional[float] = None
+    blur_sigma: Optional[float] = None
+    gamma: Optional[float] = None
+
+
+@dataclass
+class MinScaleLossConfig(LossConfig):
+    sigma_min: Optional[float] = None
+
+
+@dataclass
+class PhaseConfig:
+    photometric_loss: Optional[PhotometricLossConfig] = None
+    fixer_loss: Optional[FixerLossConfig] = None
+    minscale_loss: Optional[MinScaleLossConfig] = None
+    jitter_cm: Optional[float] = None
+    sigma_min: Optional[float] = None
+    lambda_sigma: Optional[float] = None
+    danger_percentile: Optional[float] = None
+    blur_sigma: Optional[float] = None
+    gamma: Optional[float] = None
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "PhaseConfig":
+        photometric = data.get("photometric_loss")
+        fixer = data.get("fixer_loss")
+        minscale = data.get("minscale_loss")
+        return cls(
+            photometric_loss=PhotometricLossConfig(photometric["weight"])
+            if isinstance(photometric, dict) and "weight" in photometric
+            else None,
+            fixer_loss=FixerLossConfig(
+                weight=fixer["weight"],
+                low_freq_weight=fixer.get("low_freq_weight", 1.0),
+                lpips_weight=fixer.get("lpips_weight", 0.1),
+                danger_percentile=fixer.get("danger_percentile"),
+                blur_sigma=fixer.get("blur_sigma"),
+                gamma=fixer.get("gamma"),
+            )
+            if isinstance(fixer, dict) and "weight" in fixer
+            else None,
+            minscale_loss=MinScaleLossConfig(
+                weight=minscale["weight"],
+                sigma_min=minscale.get("sigma_min"),
+            )
+            if isinstance(minscale, dict) and "weight" in minscale
+            else None,
+            jitter_cm=data.get("jitter_cm"),
+            sigma_min=data.get("sigma_min"),
+            lambda_sigma=data.get("lambda_sigma"),
+            danger_percentile=data.get("danger_percentile"),
+            blur_sigma=data.get("blur_sigma"),
+            gamma=data.get("gamma"),
+        )
+
+
+@dataclass
 class OptimizeGaussianConfig:
     gaussian_ply_path: Optional[str] = None
     output_dir: str = "output/gaussians"
@@ -22,8 +92,6 @@ class OptimizeGaussianConfig:
     jitter_views_per_cam: int = 4
     fixer_ratio: float = 0.33
     danger_percentile: float = 0.25
-    lambda_fix_low: float = 1.0
-    lambda_fix_lpips: float = 0.1
     blur_sigma: float = 1.5
     gamma: float = 5.0
     lambda_sigma: float = 0.1
@@ -48,12 +116,20 @@ class OptimizeGaussianConfig:
     lpips_net: str = "vgg"
     background_color: List[float] = None
     random_seed: int = 0
-    phase_settings: Optional[Dict[str, Dict[str, float]]] = None
+    phase_settings: Optional[Dict[str, PhaseConfig]] = None
 
     @classmethod
     def from_yaml(cls, path: str) -> "OptimizeGaussianConfig":
         with open(path, "r") as f:
             data = yaml.safe_load(f) or {}
+        raw_phase_settings = data.get("phase_settings", {})
+        phase_settings = None
+        if isinstance(raw_phase_settings, dict) and raw_phase_settings:
+            phase_settings = {
+                key: PhaseConfig.from_dict(value)
+                for key, value in raw_phase_settings.items()
+                if isinstance(value, dict)
+            }
         return cls(
             gaussian_ply_path=data.get("gaussian_ply_path"),
             output_dir=data.get("output_dir", cls.output_dir),
@@ -73,8 +149,6 @@ class OptimizeGaussianConfig:
             danger_percentile=float(
                 data.get("danger_percentile", cls.danger_percentile)
             ),
-            lambda_fix_low=float(data.get("lambda_fix_low", cls.lambda_fix_low)),
-            lambda_fix_lpips=float(data.get("lambda_fix_lpips", cls.lambda_fix_lpips)),
             blur_sigma=float(data.get("blur_sigma", cls.blur_sigma)),
             gamma=float(data.get("gamma", cls.gamma)),
             lambda_sigma=float(data.get("lambda_sigma", cls.lambda_sigma)),
@@ -111,5 +185,5 @@ class OptimizeGaussianConfig:
             lpips_net=data.get("lpips_net", cls.lpips_net),
             background_color=data.get("background_color", cls.background_color),
             random_seed=int(data.get("random_seed", cls.random_seed)),
-            phase_settings=data.get("phase_settings", cls.phase_settings),
+            phase_settings=phase_settings,
         )

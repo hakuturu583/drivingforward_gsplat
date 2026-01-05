@@ -10,10 +10,13 @@ from gsplat.optimizers import SelectiveAdam
 from tqdm import tqdm
 
 from drivingforward_gsplat.models.gaussian import rendering as gs_render
-from drivingforward_gsplat.optimize_gaussian.dataclass import OptimizeGaussianConfig
+from drivingforward_gsplat.optimize_gaussian.dataclass import (
+    OptimizeGaussianConfig,
+    PhaseConfig,
+)
 from drivingforward_gsplat.optimize_gaussian.losses import (
     FixerLoss,
-    FixerLossConfig,
+    FixerLossParams,
     charbonnier,
     masked_mean,
 )
@@ -23,8 +26,6 @@ from drivingforward_gsplat.optimize_gaussian.strategy import (
 )
 from drivingforward_gsplat.utils.gaussian_ply import save_gaussians_tensors_as_inria_ply
 from drivingforward_gsplat.utils.misc import to_pil_rgb
-
-
 
 
 def erode_mask(mask: torch.Tensor, kernel: int, iters: int) -> torch.Tensor:
@@ -111,6 +112,10 @@ def _select_views(
     return [v for v in filtered if v["type"] == kind]
 
 
+def _apply_optional(value: Optional[float], fallback: float) -> float:
+    return fallback if value is None else float(value)
+
+
 def _resolve_phase_loss(
     cfg: OptimizeGaussianConfig,
     phase_id: str,
@@ -118,8 +123,8 @@ def _resolve_phase_loss(
     base = {
         "photometric_loss_weight": 1.0,
         "fixer_loss_weight": 0.02,
-        "lambda_fix_low": cfg.lambda_fix_low,
-        "lambda_fix_lpips": cfg.lambda_fix_lpips,
+        "fixer_low_freq_weight": 1.0,
+        "fixer_lpips_weight": 0.1,
         "lambda_sigma": cfg.lambda_sigma,
         "sigma_min": cfg.sigma_min,
         "danger_percentile": cfg.danger_percentile,
@@ -127,23 +132,33 @@ def _resolve_phase_loss(
         "gamma": cfg.gamma,
         "jitter_cm": 0.0,
     }
-    overrides: Dict[str, float] = {}
-    if cfg.phase_settings:
-        if phase_id in cfg.phase_settings:
-            phase_override = cfg.phase_settings.get(phase_id, {})
-            if "photometric_loss" in phase_override:
-                overrides["photometric_loss_weight"] = float(
-                    phase_override.get("photometric_loss", {}).get("weight")
-                )
-            if "fixer_loss" in phase_override:
-                overrides["fixer_loss_weight"] = float(
-                    phase_override.get("fixer_loss", {}).get("weight")
-                )
-            for key, value in phase_override.items():
-                if key in ("photometric_loss", "fixer_loss"):
-                    continue
-                overrides[key] = value
-    base.update(overrides)
+    if cfg.phase_settings and phase_id in cfg.phase_settings:
+        phase_cfg: PhaseConfig = cfg.phase_settings[phase_id]
+        if phase_cfg.photometric_loss is not None:
+            base["photometric_loss_weight"] = float(phase_cfg.photometric_loss.weight)
+        if phase_cfg.fixer_loss is not None:
+            base["fixer_loss_weight"] = float(phase_cfg.fixer_loss.weight)
+            base["fixer_low_freq_weight"] = float(phase_cfg.fixer_loss.low_freq_weight)
+            base["fixer_lpips_weight"] = float(phase_cfg.fixer_loss.lpips_weight)
+            base["danger_percentile"] = _apply_optional(
+                phase_cfg.fixer_loss.danger_percentile, base["danger_percentile"]
+            )
+            base["blur_sigma"] = _apply_optional(
+                phase_cfg.fixer_loss.blur_sigma, base["blur_sigma"]
+            )
+            base["gamma"] = _apply_optional(
+                phase_cfg.fixer_loss.gamma, base["gamma"]
+            )
+        if phase_cfg.minscale_loss is not None:
+            base["lambda_sigma"] = float(phase_cfg.minscale_loss.weight)
+            base["sigma_min"] = _apply_optional(
+                phase_cfg.minscale_loss.sigma_min, base["sigma_min"]
+            )
+        base["jitter_cm"] = _apply_optional(phase_cfg.jitter_cm, base["jitter_cm"])
+        base["sigma_min"] = _apply_optional(phase_cfg.sigma_min, base["sigma_min"])
+        base["lambda_sigma"] = _apply_optional(
+            phase_cfg.lambda_sigma, base["lambda_sigma"]
+        )
     return base
 
 
@@ -300,12 +315,12 @@ def optimize_gaussians(
 
     optimizers = _prepare_optimizers(params, cfg.lr)
     fixer_loss = FixerLoss(
-        FixerLossConfig(
+        FixerLossParams(
             danger_percentile=cfg.danger_percentile,
             blur_sigma=cfg.blur_sigma,
             gamma=cfg.gamma,
-            lambda_fix_low=cfg.lambda_fix_low,
-            lambda_fix_lpips=cfg.lambda_fix_lpips,
+            low_freq_weight=1.0,
+            lpips_weight=0.1,
             use_lpips=cfg.use_lpips,
             lpips_net=cfg.lpips_net,
         )
@@ -333,12 +348,12 @@ def optimize_gaussians(
         lambda_sigma = float(phase_loss_cfg["lambda_sigma"])
         jitter_cm = float(phase_loss_cfg.get("jitter_cm", 0.0))
         fixer_loss.set_config(
-            FixerLossConfig(
+            FixerLossParams(
                 danger_percentile=float(phase_loss_cfg["danger_percentile"]),
                 blur_sigma=float(phase_loss_cfg["blur_sigma"]),
                 gamma=float(phase_loss_cfg["gamma"]),
-                lambda_fix_low=float(phase_loss_cfg["lambda_fix_low"]),
-                lambda_fix_lpips=float(phase_loss_cfg["lambda_fix_lpips"]),
+                low_freq_weight=float(phase_loss_cfg["fixer_low_freq_weight"]),
+                lpips_weight=float(phase_loss_cfg["fixer_lpips_weight"]),
                 use_lpips=cfg.use_lpips,
                 lpips_net=cfg.lpips_net,
             )
