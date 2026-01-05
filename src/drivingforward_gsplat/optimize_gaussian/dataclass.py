@@ -81,24 +81,25 @@ class SkyMaskConfig:
 class MergeStrategyConfig:
     every: int = 200
     voxel_size: float = 0.05
+    voxel_size_distance_scale: float = 0.0
     small_scale: float = 0.02
     prune_thin_opacity: Optional[float] = None
     color_bin: float = 0.1
-    min_distance: Optional[float] = None
 
     @classmethod
     def from_dict(cls, data: Dict) -> "MergeStrategyConfig":
-        min_distance = data.get("min_distance", cls.min_distance)
         prune_thin_opacity = data.get("prune_thin_opacity", cls.prune_thin_opacity)
         return cls(
             every=int(data.get("every", cls.every)),
             voxel_size=float(data.get("voxel_size", cls.voxel_size)),
+            voxel_size_distance_scale=float(
+                data.get("voxel_size_distance_scale", cls.voxel_size_distance_scale)
+            ),
             small_scale=float(data.get("small_scale", cls.small_scale)),
             prune_thin_opacity=(
                 None if prune_thin_opacity is None else float(prune_thin_opacity)
             ),
             color_bin=float(data.get("color_bin", cls.color_bin)),
-            min_distance=None if min_distance is None else float(min_distance),
         )
 
 
