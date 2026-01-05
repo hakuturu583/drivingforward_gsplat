@@ -30,14 +30,14 @@ def _sam3_mask_from_render(
     from drivingforward_gsplat.mask.sam3_mask import Sam3MaskConfig, cutout_with_sam3
 
     sam3_cfg = Sam3MaskConfig(
-        model_id=cfg.sam3_model_id,
-        device=cfg.sam3_device,
-        dtype=cfg.sam3_dtype,
-        mask_threshold=cfg.sam3_mask_threshold,
-        resize_longest_side=cfg.sam3_resize_longest_side,
+        model_id=cfg.sky_mask.sam3_model_id,
+        device=cfg.sky_mask.sam3_device,
+        dtype=cfg.sky_mask.sam3_dtype,
+        mask_threshold=cfg.sky_mask.sam3_mask_threshold,
+        resize_longest_side=cfg.sky_mask.sam3_resize_longest_side,
     )
-    mask = cutout_with_sam3(image, cfg.sam3_prompt, sam3_cfg)
-    if cfg.sam3_invert:
+    mask = cutout_with_sam3(image, cfg.sky_mask.sam3_prompt, sam3_cfg)
+    if cfg.sky_mask.sam3_invert:
         mask = ~mask
     return mask
 
@@ -174,7 +174,7 @@ def _prepare_view_entries(
         mask_source = input_render
         mask = _sam3_mask_from_render(mask_source, cfg)
         mask = mask.to(dtype=torch.float32).unsqueeze(0)
-        mask = erode_mask(mask, cfg.sky_erode_kernel, cfg.sky_erode_iter)
+        mask = erode_mask(mask, cfg.sky_mask.erode_kernel, cfg.sky_mask.erode_iter)
 
         raw_views.append(
             {

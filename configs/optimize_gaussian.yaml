@@ -50,15 +50,16 @@ merge_thin_opacity: 0.05
 background_freeze_steps: null
 background_remove_step: null
 log_every: 50
-sky_erode_kernel: 3
-sky_erode_iter: 1
-sam3_prompt: sky
-sam3_invert: true
-sam3_model_id: facebook/sam3
-sam3_device: cuda
-sam3_dtype: auto
-sam3_mask_threshold: 0.5
-sam3_resize_longest_side: null
+sky_mask:
+  erode_kernel: 3
+  erode_iter: 1
+  sam3_prompt: sky
+  sam3_invert: true
+  sam3_model_id: facebook/sam3
+  sam3_device: cuda
+  sam3_dtype: auto
+  sam3_mask_threshold: 0.5
+  sam3_resize_longest_side: null
 use_lpips: true
 lpips_net: vgg
 background_color:

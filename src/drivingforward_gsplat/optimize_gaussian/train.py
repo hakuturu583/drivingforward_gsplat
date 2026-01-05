@@ -146,9 +146,7 @@ def _resolve_phase_loss(
             base["blur_sigma"] = _apply_optional(
                 phase_cfg.fixer_loss.blur_sigma, base["blur_sigma"]
             )
-            base["gamma"] = _apply_optional(
-                phase_cfg.fixer_loss.gamma, base["gamma"]
-            )
+            base["gamma"] = _apply_optional(phase_cfg.fixer_loss.gamma, base["gamma"])
         if phase_cfg.minscale_loss is not None:
             base["lambda_sigma"] = float(phase_cfg.minscale_loss.weight)
             base["sigma_min"] = _apply_optional(

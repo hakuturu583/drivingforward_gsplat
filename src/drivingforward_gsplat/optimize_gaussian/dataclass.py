@@ -31,6 +31,37 @@ class MinScaleLossConfig(LossConfig):
 
 
 @dataclass
+class SkyMaskConfig:
+    erode_kernel: int = 3
+    erode_iter: int = 1
+    sam3_prompt: str = "sky"
+    sam3_invert: bool = True
+    sam3_model_id: str = "facebook/sam3"
+    sam3_device: str = "cuda"
+    sam3_dtype: str = "auto"
+    sam3_mask_threshold: float = 0.5
+    sam3_resize_longest_side: Optional[int] = None
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "SkyMaskConfig":
+        return cls(
+            erode_kernel=int(data.get("erode_kernel", cls.erode_kernel)),
+            erode_iter=int(data.get("erode_iter", cls.erode_iter)),
+            sam3_prompt=data.get("sam3_prompt", cls.sam3_prompt),
+            sam3_invert=bool(data.get("sam3_invert", cls.sam3_invert)),
+            sam3_model_id=data.get("sam3_model_id", cls.sam3_model_id),
+            sam3_device=data.get("sam3_device", cls.sam3_device),
+            sam3_dtype=data.get("sam3_dtype", cls.sam3_dtype),
+            sam3_mask_threshold=float(
+                data.get("sam3_mask_threshold", cls.sam3_mask_threshold)
+            ),
+            sam3_resize_longest_side=data.get(
+                "sam3_resize_longest_side", cls.sam3_resize_longest_side
+            ),
+        )
+
+
+@dataclass
 class PhaseConfig:
     photometric_loss: Optional[PhotometricLossConfig] = None
     fixer_loss: Optional[FixerLossConfig] = None
@@ -103,15 +134,7 @@ class OptimizeGaussianConfig:
     background_freeze_steps: Optional[int] = 500
     background_remove_step: Optional[int] = None
     log_every: int = 50
-    sky_erode_kernel: int = 3
-    sky_erode_iter: int = 1
-    sam3_prompt: str = "sky"
-    sam3_invert: bool = True
-    sam3_model_id: str = "facebook/sam3"
-    sam3_device: str = "cuda"
-    sam3_dtype: str = "auto"
-    sam3_mask_threshold: float = 0.5
-    sam3_resize_longest_side: Optional[int] = None
+    sky_mask: SkyMaskConfig = SkyMaskConfig()
     use_lpips: bool = True
     lpips_net: str = "vgg"
     background_color: List[float] = None
@@ -123,6 +146,7 @@ class OptimizeGaussianConfig:
         with open(path, "r") as f:
             data = yaml.safe_load(f) or {}
         raw_phase_settings = data.get("phase_settings", {})
+        raw_sky_mask = data.get("sky_mask", {})
         phase_settings = None
         if isinstance(raw_phase_settings, dict) and raw_phase_settings:
             phase_settings = {
@@ -130,6 +154,9 @@ class OptimizeGaussianConfig:
                 for key, value in raw_phase_settings.items()
                 if isinstance(value, dict)
             }
+        sky_mask = (
+            SkyMaskConfig.from_dict(raw_sky_mask) if raw_sky_mask else cls.sky_mask
+        )
         return cls(
             gaussian_ply_path=data.get("gaussian_ply_path"),
             output_dir=data.get("output_dir", cls.output_dir),
@@ -168,19 +195,7 @@ class OptimizeGaussianConfig:
                 "background_remove_step", cls.background_remove_step
             ),
             log_every=int(data.get("log_every", cls.log_every)),
-            sky_erode_kernel=int(data.get("sky_erode_kernel", cls.sky_erode_kernel)),
-            sky_erode_iter=int(data.get("sky_erode_iter", cls.sky_erode_iter)),
-            sam3_prompt=data.get("sam3_prompt", cls.sam3_prompt),
-            sam3_invert=bool(data.get("sam3_invert", cls.sam3_invert)),
-            sam3_model_id=data.get("sam3_model_id", cls.sam3_model_id),
-            sam3_device=data.get("sam3_device", cls.sam3_device),
-            sam3_dtype=data.get("sam3_dtype", cls.sam3_dtype),
-            sam3_mask_threshold=float(
-                data.get("sam3_mask_threshold", cls.sam3_mask_threshold)
-            ),
-            sam3_resize_longest_side=data.get(
-                "sam3_resize_longest_side", cls.sam3_resize_longest_side
-            ),
+            sky_mask=sky_mask,
             use_lpips=bool(data.get("use_lpips", cls.use_lpips)),
             lpips_net=data.get("lpips_net", cls.lpips_net),
             background_color=data.get("background_color", cls.background_color),
