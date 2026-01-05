@@ -441,9 +441,7 @@ def optimize_gaussians(
                     f"gaussians={means.shape[0]}"
                 )
                 print(message)
-                progress.set_postfix_str(
-                    f"loss={loss.item():.4f} g={means.shape[0]}"
-                )
+                progress.set_postfix_str(f"loss={loss.item():.4f} g={means.shape[0]}")
 
             if cfg.background_remove_step and global_step == cfg.background_remove_step:
                 keep = ~bg_mask
