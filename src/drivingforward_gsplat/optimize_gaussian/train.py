@@ -352,6 +352,20 @@ def optimize_gaussians(
         )
     )
 
+    if raw_views:
+        _save_debug_snapshot(
+            cfg,
+            "init",
+            0,
+            raw_views[0],
+            means,
+            rotations,
+            scales,
+            opacities,
+            shs,
+        )
+        print("[optimize] saved debug snapshot for phase=init step=0")
+
     all_cams = sorted({v["cam_idx"] for v in raw_views})
     phase1_runtime = _resolve_phase_runtime(
         cfg,
