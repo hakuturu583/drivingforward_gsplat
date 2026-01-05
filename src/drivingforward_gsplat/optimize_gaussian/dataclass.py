@@ -66,6 +66,9 @@ class PhaseConfig:
     photometric_loss: Optional[PhotometricLossConfig] = None
     fixer_loss: Optional[FixerLossConfig] = None
     minscale_loss: Optional[MinScaleLossConfig] = None
+    steps: Optional[int] = None
+    cam_count: Optional[int] = None
+    jitter_views_per_cam: Optional[int] = None
     jitter_cm: Optional[float] = None
     sigma_min: Optional[float] = None
     lambda_sigma: Optional[float] = None
@@ -98,6 +101,9 @@ class PhaseConfig:
             )
             if isinstance(minscale, dict) and "weight" in minscale
             else None,
+            steps=data.get("steps"),
+            cam_count=data.get("cam_count"),
+            jitter_views_per_cam=data.get("jitter_views_per_cam"),
             jitter_cm=data.get("jitter_cm"),
             sigma_min=data.get("sigma_min"),
             lambda_sigma=data.get("lambda_sigma"),
@@ -115,12 +121,6 @@ class OptimizeGaussianConfig:
     debug_dir_name: str = "debug"
     device: str = "cuda"
     lr: float = 5e-3
-    raw_steps: int = 1000
-    phase2_steps: int = 1000
-    phase3_steps: int = 1000
-    phase1_cam_count: int = 2
-    phase2_cam_count: int = 4
-    jitter_views_per_cam: int = 4
     fixer_ratio: float = 0.33
     danger_percentile: float = 0.25
     blur_sigma: float = 1.5
@@ -164,14 +164,6 @@ class OptimizeGaussianConfig:
             debug_dir_name=data.get("debug_dir_name", cls.debug_dir_name),
             device=data.get("device", cls.device),
             lr=float(data.get("lr", cls.lr)),
-            raw_steps=int(data.get("raw_steps", cls.raw_steps)),
-            phase2_steps=int(data.get("phase2_steps", cls.phase2_steps)),
-            phase3_steps=int(data.get("phase3_steps", cls.phase3_steps)),
-            phase1_cam_count=int(data.get("phase1_cam_count", cls.phase1_cam_count)),
-            phase2_cam_count=int(data.get("phase2_cam_count", cls.phase2_cam_count)),
-            jitter_views_per_cam=int(
-                data.get("jitter_views_per_cam", cls.jitter_views_per_cam)
-            ),
             fixer_ratio=float(data.get("fixer_ratio", cls.fixer_ratio)),
             danger_percentile=float(
                 data.get("danger_percentile", cls.danger_percentile)

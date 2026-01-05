@@ -160,6 +160,31 @@ def _resolve_phase_loss(
     return base
 
 
+def _resolve_phase_runtime(
+    cfg: OptimizeGaussianConfig,
+    phase_id: str,
+    default_steps: int,
+    default_cam_count: int,
+    default_jitter_views_per_cam: int,
+) -> Dict[str, int]:
+    steps = default_steps
+    cam_count = default_cam_count
+    jitter_views_per_cam = default_jitter_views_per_cam
+    if cfg.phase_settings and phase_id in cfg.phase_settings:
+        phase_cfg = cfg.phase_settings[phase_id]
+        if phase_cfg.steps is not None:
+            steps = int(phase_cfg.steps)
+        if phase_cfg.cam_count is not None:
+            cam_count = int(phase_cfg.cam_count)
+        if phase_cfg.jitter_views_per_cam is not None:
+            jitter_views_per_cam = int(phase_cfg.jitter_views_per_cam)
+    return {
+        "steps": steps,
+        "cam_count": cam_count,
+        "jitter_views_per_cam": jitter_views_per_cam,
+    }
+
+
 def _make_jittered_views(
     views: List[Dict],
     jitter_cm: float,
@@ -325,18 +350,43 @@ def optimize_gaussians(
     )
 
     all_cams = sorted({v["cam_idx"] for v in raw_views})
-    phase1_cams = all_cams[: max(1, min(cfg.phase1_cam_count, len(all_cams)))]
-    phase2_cams = all_cams[: max(1, min(cfg.phase2_cam_count, len(all_cams)))]
+    default_jitter_views_per_cam = 4
+    phase1_runtime = _resolve_phase_runtime(
+        cfg,
+        "phase1",
+        default_steps=1000,
+        default_cam_count=2,
+        default_jitter_views_per_cam=default_jitter_views_per_cam,
+    )
+    phase2_runtime = _resolve_phase_runtime(
+        cfg,
+        "phase2",
+        default_steps=1000,
+        default_cam_count=4,
+        default_jitter_views_per_cam=default_jitter_views_per_cam,
+    )
+    phase3_runtime = _resolve_phase_runtime(
+        cfg,
+        "phase3",
+        default_steps=1000,
+        default_cam_count=len(all_cams),
+        default_jitter_views_per_cam=default_jitter_views_per_cam,
+    )
+
+    phase1_cams = all_cams[: max(1, min(phase1_runtime["cam_count"], len(all_cams)))]
+    phase2_cams = all_cams[: max(1, min(phase2_runtime["cam_count"], len(all_cams)))]
+    phase3_cams = all_cams[: max(1, min(phase3_runtime["cam_count"], len(all_cams)))]
 
     phases = [
-        ("phase1", "raw", cfg.raw_steps, phase1_cams),
-        ("phase2", "mix", cfg.phase2_steps, phase2_cams),
-        ("phase3", "mix", cfg.phase3_steps, all_cams),
+        ("phase1", "raw", phase1_runtime, phase1_cams),
+        ("phase2", "mix", phase2_runtime, phase2_cams),
+        ("phase3", "mix", phase3_runtime, phase3_cams),
     ]
 
     global_step = 0
     rng = random.Random(cfg.random_seed)
-    for phase_id, phase_mode, steps, cam_indices in phases:
+    for phase_id, phase_mode, runtime, cam_indices in phases:
+        steps = int(runtime["steps"])
         if steps <= 0:
             continue
         phase_loss_cfg = _resolve_phase_loss(cfg, phase_id)
@@ -345,6 +395,7 @@ def optimize_gaussians(
         lambda_fix = float(phase_loss_cfg["fixer_loss_weight"])
         lambda_sigma = float(phase_loss_cfg["lambda_sigma"])
         jitter_cm = float(phase_loss_cfg.get("jitter_cm", 0.0))
+        jitter_views_per_cam = int(runtime["jitter_views_per_cam"])
         fixer_loss.set_config(
             FixerLossParams(
                 danger_percentile=float(phase_loss_cfg["danger_percentile"]),
@@ -358,12 +409,12 @@ def optimize_gaussians(
         )
         print(
             f"[optimize] phase={phase_id} steps={steps} cams={cam_indices} "
-            f"jitter_cm={jitter_cm} per_cam={cfg.jitter_views_per_cam}"
+            f"jitter_cm={jitter_cm} per_cam={jitter_views_per_cam}"
         )
         raw_subset = _select_views(raw_views, cam_indices, kind="raw")
         fixer_subset = _select_views(fixer_views, cam_indices, kind="fixer")
         raw_subset = raw_subset + _make_jittered_views(
-            raw_subset, jitter_cm, cfg.jitter_views_per_cam, rng
+            raw_subset, jitter_cm, jitter_views_per_cam, rng
         )
         progress = tqdm(range(steps), desc=f"optimize/{phase_id}", leave=False)
         last_view = None

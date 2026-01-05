@@ -4,12 +4,6 @@ output_ply_name: optimized.ply
 debug_dir_name: debug
 device: cuda
 lr: 0.005
-raw_steps: 1000
-phase2_steps: 1000
-phase3_steps: 1000
-phase1_cam_count: 2
-phase2_cam_count: 4
-jitter_views_per_cam: 4
 fixer_ratio: 0.33
 danger_percentile: 0.25
 blur_sigma: 1.5
@@ -20,6 +14,9 @@ phase_settings:
   phase0:
     sigma_min: 0.03
   phase1:
+    steps: 1000
+    cam_count: 2
+    jitter_views_per_cam: 4
     photometric_loss:
       weight: 1.0
     fixer_loss:
@@ -28,6 +25,9 @@ phase_settings:
       lpips_weight: 0.1
     jitter_cm: 1.0
   phase2:
+    steps: 1000
+    cam_count: 4
+    jitter_views_per_cam: 4
     photometric_loss:
       weight: 1.0
     fixer_loss:
@@ -36,6 +36,9 @@ phase_settings:
       lpips_weight: 0.1
     jitter_cm: 3.0
   phase3:
+    steps: 1000
+    cam_count: 6
+    jitter_views_per_cam: 4
     photometric_loss:
       weight: 1.0
     fixer_loss:
