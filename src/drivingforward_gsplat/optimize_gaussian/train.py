@@ -129,6 +129,7 @@ def _resolve_phase_loss(
         "fixer_lpips_net": "vgg",
         "lambda_sigma": 0.1,
         "min_scale": 0.03,
+        "max_scale": None,
         "opacity_sparsity_weight": 0.0,
         "danger_percentile": 0.25,
         "blur_sigma": 1.5,
@@ -164,6 +165,9 @@ def _resolve_phase_loss(
             base["lambda_sigma"] = float(phase_cfg.minscale_loss.weight)
             base["min_scale"] = _apply_optional(
                 phase_cfg.minscale_loss.min_scale, base["min_scale"]
+            )
+            base["max_scale"] = _apply_optional(
+                phase_cfg.minscale_loss.max_scale, base["max_scale"]
             )
         if phase_cfg.opacity_sparsity_loss is not None and phase_id == "phase0":
             base["opacity_sparsity_weight"] = float(
@@ -409,6 +413,7 @@ def optimize_gaussians(
             continue
         phase_loss_cfg = _resolve_phase_loss(cfg, phase_id)
         phase_sigma_min = float(phase_loss_cfg["min_scale"])
+        phase_sigma_max = phase_loss_cfg.get("max_scale")
         lambda_raw = float(phase_loss_cfg["photometric_loss_weight"])
         lambda_fix = float(phase_loss_cfg["fixer_loss_weight"])
         lambda_sigma = float(phase_loss_cfg["lambda_sigma"])
@@ -488,6 +493,8 @@ def optimize_gaussians(
 
             if lambda_sigma > 0:
                 sigma_loss = F.relu(phase_sigma_min - scales).pow(2.0)
+                if phase_sigma_max is not None:
+                    sigma_loss = sigma_loss + F.relu(scales - phase_sigma_max).pow(2.0)
                 if torch.any(fg_mask):
                     sigma_loss = sigma_loss[fg_mask].mean()
                     loss_sigma_val = lambda_sigma * sigma_loss
