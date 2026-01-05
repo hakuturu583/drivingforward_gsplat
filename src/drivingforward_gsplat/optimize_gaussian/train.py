@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 import yaml
 from gsplat.optimizers import SelectiveAdam
+from tqdm import tqdm
 
 from drivingforward_gsplat.models.gaussian import rendering as gs_render
 from drivingforward_gsplat.optimize_gaussian.losses import (
@@ -53,6 +54,7 @@ class OptimizeGaussianConfig:
     merge_thin_opacity: float = 0.05
     background_freeze_steps: int = 500
     background_remove_step: Optional[int] = None
+    log_every: int = 50
     sky_erode_kernel: int = 3
     sky_erode_iter: int = 1
     sam3_prompt: str = "sky"
@@ -113,6 +115,7 @@ class OptimizeGaussianConfig:
             background_remove_step=data.get(
                 "background_remove_step", cls.background_remove_step
             ),
+            log_every=int(data.get("log_every", cls.log_every)),
             sky_erode_kernel=int(data.get("sky_erode_kernel", cls.sky_erode_kernel)),
             sky_erode_iter=int(data.get("sky_erode_iter", cls.sky_erode_iter)),
             sam3_prompt=data.get("sam3_prompt", cls.sam3_prompt),
@@ -347,12 +350,17 @@ def optimize_gaussians(
     for phase_name, steps, cam_indices, jitter_cm in phases:
         if steps <= 0:
             continue
+        print(
+            f"[optimize] phase={phase_name} steps={steps} cams={cam_indices} "
+            f"jitter_cm={jitter_cm} per_cam={cfg.jitter_views_per_cam}"
+        )
         raw_subset = _select_views(raw_views, cam_indices, kind="raw")
         fixer_subset = _select_views(fixer_views, cam_indices, kind="fixer")
         raw_subset = raw_subset + _make_jittered_views(
             raw_subset, jitter_cm, cfg.jitter_views_per_cam, rng
         )
-        for _ in range(steps):
+        progress = tqdm(range(steps), desc=f"optimize/{phase_name}", leave=False)
+        for _ in progress:
             global_step += 1
             if phase_name == "raw" or not fixer_subset:
                 view = random.choice(raw_subset)
@@ -382,24 +390,30 @@ def optimize_gaussians(
             )
 
             mask = view["mask"]
+            loss_raw_val = torch.tensor(0.0, device=device)
+            loss_fix_val = torch.tensor(0.0, device=device)
+            loss_sigma_val = torch.tensor(0.0, device=device)
             if view["type"] == "raw":
                 diff = rendered - view["rgb"]
                 loss_raw = charbonnier(diff)
                 loss_raw = torch.mean(loss_raw, dim=0, keepdim=True)
-                loss = masked_mean(loss_raw, mask)
+                loss_raw_val = masked_mean(loss_raw, mask)
+                loss = loss_raw_val
             else:
-                loss = cfg.lambda_fix * fixer_loss(
+                loss_fix_val = cfg.lambda_fix * fixer_loss(
                     rendered,
                     view["fixer_rgb"],
                     view["input_render"],
                     mask,
                 )
+                loss = loss_fix_val
 
             if cfg.lambda_sigma > 0:
                 sigma_loss = F.relu(cfg.sigma_min - scales).pow(2.0)
                 if torch.any(fg_mask):
                     sigma_loss = sigma_loss[fg_mask].mean()
-                    loss = loss + cfg.lambda_sigma * sigma_loss
+                    loss_sigma_val = cfg.lambda_sigma * sigma_loss
+                    loss = loss + loss_sigma_val
 
             for opt in optimizers.values():
                 opt.zero_grad(set_to_none=True)
@@ -418,6 +432,19 @@ def optimize_gaussians(
             _clamp_scales(scales.data, cfg.sigma_min, fg_mask)
             _clamp_opacities(opacities.data)
 
+            if cfg.log_every > 0 and global_step % cfg.log_every == 0:
+                message = (
+                    f"[optimize] step={global_step} phase={phase_name} "
+                    f"type={view['type']} loss={loss.item():.6f} "
+                    f"raw={loss_raw_val.item():.6f} fix={loss_fix_val.item():.6f} "
+                    f"sigma={loss_sigma_val.item():.6f} "
+                    f"gaussians={means.shape[0]}"
+                )
+                print(message)
+                progress.set_postfix_str(
+                    f"loss={loss.item():.4f} g={means.shape[0]}"
+                )
+
             if cfg.background_remove_step and global_step == cfg.background_remove_step:
                 keep = ~bg_mask
                 means = torch.nn.Parameter(means.data[keep])
@@ -435,6 +462,10 @@ def optimize_gaussians(
                     "shs": shs,
                 }
                 optimizers = _prepare_optimizers(params, cfg.lr)
+                print(
+                    f"[optimize] removed background at step={global_step} "
+                    f"gaussians={means.shape[0]}"
+                )
 
             if cfg.merge_every > 0 and (global_step % cfg.merge_every == 0):
                 (
@@ -468,6 +499,9 @@ def optimize_gaussians(
                     "shs": shs,
                 }
                 optimizers = _prepare_optimizers(params, cfg.lr)
+                print(
+                    f"[optimize] merged at step={global_step} gaussians={means.shape[0]}"
+                )
 
     return {
         "means": means.data.detach().cpu(),

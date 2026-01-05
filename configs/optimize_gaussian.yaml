@@ -27,6 +27,7 @@ merge_small_scale: 0.02
 merge_thin_opacity: 0.05
 background_freeze_steps: 500
 background_remove_step: null
+log_every: 50
 sky_erode_kernel: 3
 sky_erode_iter: 1
 sam3_prompt: sky
