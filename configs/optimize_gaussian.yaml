@@ -6,14 +6,14 @@ device: cuda
 lr: 0.005
 phase_settings:
   phase1:
-    steps: 1000
+    steps: 10000
     cam_count: 6
     jitter_views_per_cam: 4
     fixer_view_use_ratio: 0.0
     minscale_loss:
       weight: 0.2
       min_scale: 0.03
-      max_scale: 0.12
+      max_scale: 0.08
       min_weight: 0.2
       max_weight: 5.0
     opacity_sparsity_loss:
@@ -65,11 +65,11 @@ phase_settings:
       gamma: 5.0
     jitter_cm: 5.0
 merge:
-  every: 200
-  voxel_size: 0.05
+  every: 400
+  voxel_size: 0.03
   small_scale: 0.02
   thin_opacity: 0.05
-  color_bin: 0.1
+  color_bin: 0.05
 background_freeze_steps: null
 background_remove_step: null
 log_every: 50
