@@ -267,9 +267,11 @@ def save_gaussians_tensors_as_inria_ply(
     scale_np = scale_log.detach().cpu().numpy().astype(np.float32)
     opacity_np = opacity_logit.detach().cpu().numpy().astype(np.float32)
     sh_np = sh.detach().cpu().numpy().astype(np.float32)
+    if sh_np.ndim == 3 and sh_np.shape[-1] == 3 and sh_np.shape[1] != 3:
+        sh_np = sh_np.transpose(0, 2, 1)
 
     num = xyz_np.shape[0]
-    d_sh = sh_np.shape[1]
+    d_sh = sh_np.shape[2]
     rest_dim = max(d_sh - 1, 0)
     dtype_fields = (
         [
@@ -279,12 +281,21 @@ def save_gaussians_tensors_as_inria_ply(
             ("nx", "f4"),
             ("ny", "f4"),
             ("nz", "f4"),
+            ("f_dc_0", "f4"),
+            ("f_dc_1", "f4"),
+            ("f_dc_2", "f4"),
         ]
-        + [(f"f_dc_{i}", "f4") for i in range(3)]
         + [(f"f_rest_{i}", "f4") for i in range(rest_dim * 3)]
-        + [("opacity", "f4")]
-        + [(f"scale_{i}", "f4") for i in range(3)]
-        + [(f"rot_{i}", "f4") for i in range(4)]
+        + [
+            ("opacity", "f4"),
+            ("scale_0", "f4"),
+            ("scale_1", "f4"),
+            ("scale_2", "f4"),
+            ("rot_0", "f4"),
+            ("rot_1", "f4"),
+            ("rot_2", "f4"),
+            ("rot_3", "f4"),
+        ]
     )
 
     data = np.zeros(num, dtype=dtype_fields)
@@ -295,16 +306,17 @@ def save_gaussians_tensors_as_inria_ply(
     data["ny"] = 0.0
     data["nz"] = 0.0
 
-    data["f_dc_0"] = sh_np[:, 0, 0]
-    data["f_dc_1"] = sh_np[:, 0, 1]
-    data["f_dc_2"] = sh_np[:, 0, 2]
+    dc = sh_np[:, :, 0]
+    data["f_dc_0"] = dc[:, 0]
+    data["f_dc_1"] = dc[:, 1]
+    data["f_dc_2"] = dc[:, 2]
 
-    if rest_dim > 0:
-        sh_rest = sh_np[:, 1:, :].transpose(0, 2, 1).reshape(num, -1)
-        for idx in range(rest_dim * 3):
-            data[f"f_rest_{idx}"] = sh_rest[:, idx]
+    if rest_dim:
+        rest = sh_np[:, :, 1:].reshape(num, -1)
+        for idx in range(rest.shape[1]):
+            data[f"f_rest_{idx}"] = rest[:, idx]
 
-    data["opacity"] = opacity_np[:, 0] if opacity_np.ndim > 1 else opacity_np
+    data["opacity"] = opacity_np[:, 0]
     data["scale_0"] = scale_np[:, 0]
     data["scale_1"] = scale_np[:, 1]
     data["scale_2"] = scale_np[:, 2]
