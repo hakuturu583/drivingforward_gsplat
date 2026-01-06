@@ -371,6 +371,7 @@ def optimize_gaussians(
         voxel_size=cfg.merge.voxel_size,
         voxel_size_distance_scale=cfg.merge.voxel_size_distance_scale,
         small_scale=cfg.merge.small_scale,
+        prune_scale=cfg.merge.prune_scale,
         prune_thin_opacity=cfg.merge.prune_thin_opacity,
         color_bin=cfg.merge.color_bin,
     )

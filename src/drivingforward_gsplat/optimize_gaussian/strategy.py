@@ -13,6 +13,7 @@ class MergeConfig:
     voxel_size_distance_scale: float = 0.0
     small_scale: float = 0.02
     color_bin: float = 0.1
+    prune_scale: Optional[float] = None
     prune_thin_opacity: Optional[float] = None
 
 
@@ -50,8 +51,13 @@ def merge_gaussians(
     small = scales.min(dim=1).values < cfg.small_scale
     merge_mask = fg_mask & small
     prune_mask = torch.zeros_like(merge_mask)
+    if cfg.prune_scale is not None and cfg.prune_scale > 0:
+        too_large = scales.max(dim=1).values > cfg.prune_scale
+        prune_mask = prune_mask | (fg_mask & too_large)
     if cfg.prune_thin_opacity is not None and cfg.prune_thin_opacity > 0:
-        prune_mask = fg_mask & (opacities.squeeze(-1) < cfg.prune_thin_opacity)
+        prune_mask = prune_mask | (
+            fg_mask & (opacities.squeeze(-1) < cfg.prune_thin_opacity)
+        )
         merge_mask = merge_mask & ~prune_mask
     if not torch.any(merge_mask) and not torch.any(prune_mask):
         return means, rotations, scales, opacities, shs, bg_mask

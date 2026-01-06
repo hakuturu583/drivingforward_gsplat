@@ -83,12 +83,14 @@ class MergeStrategyConfig:
     voxel_size: float = 0.05
     voxel_size_distance_scale: float = 0.0
     small_scale: float = 0.02
+    prune_scale: Optional[float] = None
     prune_thin_opacity: Optional[float] = None
     color_bin: float = 0.1
 
     @classmethod
     def from_dict(cls, data: Dict) -> "MergeStrategyConfig":
         prune_thin_opacity = data.get("prune_thin_opacity", cls.prune_thin_opacity)
+        prune_scale = data.get("prune_scale", cls.prune_scale)
         return cls(
             every=int(data.get("every", cls.every)),
             voxel_size=float(data.get("voxel_size", cls.voxel_size)),
@@ -96,6 +98,7 @@ class MergeStrategyConfig:
                 data.get("voxel_size_distance_scale", cls.voxel_size_distance_scale)
             ),
             small_scale=float(data.get("small_scale", cls.small_scale)),
+            prune_scale=(None if prune_scale is None else float(prune_scale)),
             prune_thin_opacity=(
                 None if prune_thin_opacity is None else float(prune_thin_opacity)
             ),

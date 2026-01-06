@@ -73,6 +73,7 @@ merge:
   voxel_size: 0.0005
   voxel_size_distance_scale: 0.1
   small_scale: 0.01
+  prune_scale: 0.3
   prune_thin_opacity: 0.03
   color_bin: 0.005
 background_freeze_steps: null
