@@ -21,7 +21,7 @@ phase_settings:
       max_ratio: 2.0
       gamma: 0.002
     opacity_sparsity_loss:
-      weight: 0.001
+      weight: 0.002
     photometric_loss:
       weight: 1.5
     fixer_loss:
@@ -69,10 +69,10 @@ phase_settings:
       gamma: 5.0
     jitter_cm: 5.0
 merge:
-  every: 1000
-  voxel_size: 0.005
-  voxel_size_distance_scale: 0.3
-  small_scale: 0.015
+  every: 2000
+  voxel_size: 0.0005
+  voxel_size_distance_scale: 0.1
+  small_scale: 0.01
   prune_thin_opacity: 0.03
   color_bin: 0.005
 background_freeze_steps: null
