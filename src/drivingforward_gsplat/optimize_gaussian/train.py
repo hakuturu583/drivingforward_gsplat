@@ -277,6 +277,7 @@ def _populate_fixer_renders_for_jittered(
     if not jittered_views:
         return
     with torch.no_grad():
+        raw_renders: List[torch.Tensor] = []
         for view in jittered_views:
             raw_render = gs_render.render(
                 novel_FovX=0.0,
@@ -296,8 +297,13 @@ def _populate_fixer_renders_for_jittered(
                 bg_color=view["bg_color"],
                 with_postprocess=False,
             )
-            fixer_rgb = gs_render.postprocess_by_fixer(raw_render)
-            view["raw_render_rgb"] = raw_render.detach()
+            raw_renders.append(raw_render.detach())
+        batch = torch.stack(raw_renders, dim=0)
+        fixer_batch = gs_render.postprocess_by_fixer(batch)
+        for view, raw_render, fixer_rgb in zip(
+            jittered_views, raw_renders, fixer_batch
+        ):
+            view["raw_render_rgb"] = raw_render
             view["fixer_rgb"] = fixer_rgb.detach()
 
 
