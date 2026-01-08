@@ -36,10 +36,13 @@ dependencies = [
     "docker>=7.1.0",
     "fixerpy>=0.1.0",
     "tqdm>=4.67.1",
+    "nerfview",
+    "viser",
 ]
 
 [project.scripts]
 drivingforward-gsplat = "drivingforward_gsplat.drivingforward_gsplat:main"
+view_gaussian = "drivingforward_gsplat.utils.gaussian_viewer:main"
 
 [build-system]
 requires = ["uv_build>=0.9.9,<0.10.0"]
@@ -66,4 +69,3 @@ flash-attn = [{ requirement = "torch", match-runtime = true }]
 
 [tool.uv.extra-build-variables]
 flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
-
