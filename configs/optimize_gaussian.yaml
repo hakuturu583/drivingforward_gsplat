@@ -25,7 +25,7 @@ phase_settings:
     photometric_loss:
       weight: 1.5
     fixer_loss:
-      weight: 0.0
+      weight: 0.1
       low_freq_weight: 1.0
       lpips_weight: 0.1
       use_lpips: true

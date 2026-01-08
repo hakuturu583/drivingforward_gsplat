@@ -265,6 +265,42 @@ def _make_jittered_views(
     return jittered
 
 
+def _populate_fixer_renders_for_jittered(
+    views: List[Dict],
+    means: torch.Tensor,
+    rotations: torch.Tensor,
+    scales: torch.Tensor,
+    opacities: torch.Tensor,
+    shs: torch.Tensor,
+) -> None:
+    jittered_views = [view for view in views if view.get("is_jittered")]
+    if not jittered_views:
+        return
+    with torch.no_grad():
+        for view in jittered_views:
+            raw_render = gs_render.render(
+                novel_FovX=0.0,
+                novel_FovY=0.0,
+                novel_height=view["height"],
+                novel_width=view["width"],
+                novel_world_view_transform=view["world_view_transform"],
+                novel_full_proj_transform=view["world_view_transform"],
+                novel_camera_center=None,
+                novel_K=view["K"],
+                pts_xyz=means,
+                pts_rgb=None,
+                rotations=rotations,
+                scales=scales,
+                opacity=opacities,
+                shs=shs,
+                bg_color=view["bg_color"],
+                with_postprocess=False,
+            )
+            fixer_rgb = gs_render.postprocess_by_fixer(raw_render)
+            view["raw_render_rgb"] = raw_render.detach()
+            view["fixer_rgb"] = fixer_rgb.detach()
+
+
 def _save_debug_image(
     cfg: OptimizeGaussianConfig,
     base_name: str,
@@ -492,6 +528,9 @@ def optimize_gaussians(
         raw_subset = raw_subset + _make_jittered_views(
             raw_subset, jitter_cm, jitter_views_per_cam, rng
         )
+        _populate_fixer_renders_for_jittered(
+            raw_subset, means, rotations, scales, opacities, shs
+        )
         progress = tqdm(range(steps), desc=f"optimize/{phase_id}", leave=False)
         last_view = None
         for _ in progress:
@@ -530,14 +569,15 @@ def optimize_gaussians(
             loss_sigma_val = torch.tensor(0.0, device=device)
             if view["type"] == "raw":
                 if view.get("is_jittered"):
-                    raw_render = rendered
-                    fixer_rgb = gs_render.postprocess_by_fixer(raw_render)
-                    loss_fix_val = lambda_fix * fixer_loss(
-                        rendered,
-                        fixer_rgb,
-                        raw_render,
-                        mask,
-                    )
+                    raw_render = view.get("raw_render_rgb")
+                    fixer_rgb = view.get("fixer_rgb")
+                    if raw_render is not None and fixer_rgb is not None:
+                        loss_fix_val = lambda_fix * fixer_loss(
+                            rendered,
+                            fixer_rgb,
+                            raw_render,
+                            mask,
+                        )
                     loss = loss_fix_val
                 else:
                     diff = rendered - view["rgb"]
