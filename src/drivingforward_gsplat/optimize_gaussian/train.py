@@ -242,7 +242,7 @@ def _make_jittered_views(
     jittered: List[Dict] = []
     for view in views:
         viewmat = view["viewmat"]
-        for _ in range(per_view):
+        for jitter_index in range(per_view):
             dx = rng.uniform(-jitter_m, jitter_m)
             dz = rng.uniform(-jitter_m, jitter_m)
             offset = torch.tensor(
@@ -257,12 +257,67 @@ def _make_jittered_views(
             jittered_view["viewmat"] = new_viewmat
             jittered_view["world_view_transform"] = new_world_view
             jittered_view["is_jittered"] = True
+            jittered_view["jitter_index"] = jitter_index
+            if "cam_name" in view:
+                jittered_view["cam_name"] = view["cam_name"]
             if "raw_render_rgb" in view:
                 jittered_view["raw_render_rgb"] = view["raw_render_rgb"]
             if "fixer_rgb" in view:
                 jittered_view["fixer_rgb"] = view["fixer_rgb"]
             jittered.append(jittered_view)
     return jittered
+
+
+def _debug_cam_name(view: Dict) -> str:
+    cam_name = view.get("cam_name")
+    if cam_name:
+        return str(cam_name)
+    return f"cam{int(view['cam_idx'])}"
+
+
+def _save_debug_images(
+    cfg: OptimizeGaussianConfig,
+    step_label: str,
+    views: List[Dict],
+    means: torch.Tensor,
+    rotations: torch.Tensor,
+    scales: torch.Tensor,
+    opacities: torch.Tensor,
+    shs: torch.Tensor,
+) -> None:
+    views_by_cam: Dict[int, Dict] = {}
+    for view in views:
+        if view.get("is_jittered"):
+            continue
+        cam_idx = int(view["cam_idx"])
+        if cam_idx not in views_by_cam:
+            views_by_cam[cam_idx] = view
+    for cam_idx, view in views_by_cam.items():
+        _save_debug_image(
+            cfg,
+            f"{step_label}_cam{cam_idx}",
+            view,
+            means,
+            rotations,
+            scales,
+            opacities,
+            shs,
+        )
+    for view in views:
+        if not view.get("is_jittered"):
+            continue
+        cam_name = _debug_cam_name(view)
+        jitter_index = int(view.get("jitter_index", 0))
+        _save_debug_image(
+            cfg,
+            f"{step_label}_{cam_name}_{jitter_index}",
+            view,
+            means,
+            rotations,
+            scales,
+            opacities,
+            shs,
+        )
 
 
 def _populate_fixer_renders_for_jittered(
@@ -437,22 +492,16 @@ def optimize_gaussians(
     )
 
     if raw_views:
-        views_by_cam: Dict[int, Dict] = {}
-        for view in raw_views:
-            cam_idx = int(view["cam_idx"])
-            if cam_idx not in views_by_cam:
-                views_by_cam[cam_idx] = view
-        for cam_idx, view in views_by_cam.items():
-            _save_debug_image(
-                cfg,
-                f"step_0000_cam{cam_idx}",
-                view,
-                means,
-                rotations,
-                scales,
-                opacities,
-                shs,
-            )
+        _save_debug_images(
+            cfg,
+            "step_0000",
+            raw_views,
+            means,
+            rotations,
+            scales,
+            opacities,
+            shs,
+        )
         _save_debug_ply(cfg, "step_0000", means, rotations, scales, opacities, shs)
         print("[optimize] saved debug snapshot for phase=init step=0")
 
@@ -736,22 +785,16 @@ def optimize_gaussians(
                 )
 
         if raw_subset:
-            views_by_cam: Dict[int, Dict] = {}
-            for view in raw_subset:
-                cam_idx = int(view["cam_idx"])
-                if cam_idx not in views_by_cam:
-                    views_by_cam[cam_idx] = view
-            for cam_idx, view in views_by_cam.items():
-                _save_debug_image(
-                    cfg,
-                    f"step_{global_step:04d}_cam{cam_idx}",
-                    view,
-                    means,
-                    rotations,
-                    scales,
-                    opacities,
-                    shs,
-                )
+            _save_debug_images(
+                cfg,
+                f"step_{global_step:04d}",
+                raw_subset,
+                means,
+                rotations,
+                scales,
+                opacities,
+                shs,
+            )
         if last_view is not None:
             _save_debug_ply(
                 cfg,

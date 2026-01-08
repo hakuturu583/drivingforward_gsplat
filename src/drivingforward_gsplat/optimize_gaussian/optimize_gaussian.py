@@ -180,6 +180,7 @@ def _prepare_view_entries(
             {
                 "type": "raw",
                 "cam_idx": cam_idx,
+                "cam_name": cam_name,
                 "rgb": raw,
                 "mask": mask,
                 "K": k,
@@ -196,6 +197,7 @@ def _prepare_view_entries(
                 {
                     "type": "fixer",
                     "cam_idx": cam_idx,
+                    "cam_name": cam_name,
                     "fixer_rgb": fixer_rgb.float(),
                     "raw_render_rgb": input_render.float(),
                     "mask": mask,
