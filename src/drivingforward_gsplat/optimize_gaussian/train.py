@@ -455,6 +455,11 @@ def optimize_gaussians(
         if steps <= 0:
             continue
         phase_loss_cfg = _resolve_phase_loss(cfg, phase_id)
+        phase_merge_enabled = phase_id == "phase1"
+        if cfg.phase_settings and phase_id in cfg.phase_settings:
+            phase_cfg = cfg.phase_settings[phase_id]
+            if phase_cfg.merge_enabled is not None:
+                phase_merge_enabled = bool(phase_cfg.merge_enabled)
         phase_sigma_min = float(phase_loss_cfg["min_scale"])
         phase_sigma_max = phase_loss_cfg.get("max_scale")
         lambda_raw = float(phase_loss_cfg["photometric_loss_weight"])
@@ -637,7 +642,11 @@ def optimize_gaussians(
                     f"gaussians={means.shape[0]}"
                 )
 
-            if cfg.merge.every > 0 and (global_step % cfg.merge.every == 0):
+            if (
+                phase_merge_enabled
+                and cfg.merge.every > 0
+                and (global_step % cfg.merge.every == 0)
+            ):
                 camera_center = None
                 if (
                     merge_cfg.voxel_size_distance_scale is not None

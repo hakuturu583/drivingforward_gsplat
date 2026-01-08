@@ -118,6 +118,7 @@ class PhaseConfig:
     jitter_views_per_cam: Optional[int] = None
     fixer_view_use_ratio: Optional[float] = None
     jitter_cm: Optional[float] = None
+    merge_enabled: Optional[bool] = None
     danger_percentile: Optional[float] = None
     blur_sigma: Optional[float] = None
     gamma: Optional[float] = None
@@ -176,6 +177,7 @@ class PhaseConfig:
             jitter_views_per_cam=data.get("jitter_views_per_cam"),
             fixer_view_use_ratio=data.get("fixer_view_use_ratio"),
             jitter_cm=data.get("jitter_cm"),
+            merge_enabled=data.get("merge_enabled"),
             danger_percentile=data.get("danger_percentile"),
             blur_sigma=data.get("blur_sigma"),
             gamma=data.get("gamma"),
