@@ -343,6 +343,7 @@ def optimize_gaussians(
             "world_view_transform",
             "fixer_rgb",
             "input_render",
+            "raw_render_rgb",
         ):
             if key in moved and torch.is_tensor(moved[key]):
                 moved[key] = moved[key].to(device=device, dtype=torch.float32)

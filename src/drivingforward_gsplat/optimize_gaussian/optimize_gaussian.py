@@ -197,7 +197,7 @@ def _prepare_view_entries(
                     "type": "fixer",
                     "cam_idx": cam_idx,
                     "fixer_rgb": fixer_rgb.float(),
-                    "input_render": input_render.float(),
+                    "raw_render_rgb": input_render.float(),
                     "mask": mask,
                     "K": k,
                     "viewmat": viewmat,
