@@ -91,7 +91,7 @@ class FixerLoss:
         self._lpips_warned = True
         print("LPIPS unavailable; skipping LPIPS fixer loss.")
 
-    def _danger_mask(
+    def _correction_mask(
         self,
         fixer_rgb: torch.Tensor,
         input_render: torch.Tensor,
@@ -107,7 +107,7 @@ class FixerLoss:
             return torch.ones_like(diff)
         percentile = max(0.0, min(1.0, 1.0 - self.cfg.danger_percentile))
         threshold = torch.quantile(values, percentile)
-        safe = diff < threshold
+        safe = diff <= threshold
         return safe.to(diff.dtype)
 
     def __call__(
@@ -118,16 +118,16 @@ class FixerLoss:
         mask: Optional[torch.Tensor],
     ) -> torch.Tensor:
         mask = mask if mask is not None else None
-        safe_mask = self._danger_mask(fixer_rgb, input_render, mask)
+        correction = torch.mean(torch.abs(fixer_rgb - input_render), dim=0, keepdim=True)
+        correction_mask = self._correction_mask(fixer_rgb, input_render, mask)
+        weights = torch.exp(-self.cfg.gamma * correction)
         if mask is not None:
-            combined_mask = mask * safe_mask
-        else:
-            combined_mask = safe_mask
+            weights = weights * mask
+        if correction_mask is not None:
+            weights = weights * correction_mask
 
-        diff = torch.mean(torch.abs(fixer_rgb - input_render), dim=0, keepdim=True)
-        weights = torch.exp(-self.cfg.gamma * diff)
-        if combined_mask is not None:
-            weights = weights * combined_mask
+        l1_map = torch.mean(torch.abs(rendered - fixer_rgb), dim=0, keepdim=True)
+        l1_loss = masked_mean(l1_map, weights)
 
         rendered_blur = blur_image(rendered, self.cfg.blur_sigma)
         fixer_blur = blur_image(fixer_rgb, self.cfg.blur_sigma)
@@ -140,14 +140,13 @@ class FixerLoss:
                 self._warn_lpips()
             else:
                 self._lpips = self._lpips.to(rendered.device)
-                lpips_mask = combined_mask
-                if lpips_mask is not None:
-                    rendered_lp = rendered * lpips_mask
-                    fixer_lp = fixer_rgb * lpips_mask
-                else:
-                    rendered_lp = rendered
-                    fixer_lp = fixer_rgb
+                rendered_lp = rendered * weights
+                fixer_lp = fixer_rgb * weights
                 lpips_val = self._lpips(rendered_lp.unsqueeze(0), fixer_lp.unsqueeze(0))
                 lpips_loss = lpips_val.mean()
 
-        return self.cfg.low_freq_weight * low_loss + self.cfg.lpips_weight * lpips_loss
+        return (
+            l1_loss
+            + self.cfg.low_freq_weight * low_loss
+            + self.cfg.lpips_weight * lpips_loss
+        )
