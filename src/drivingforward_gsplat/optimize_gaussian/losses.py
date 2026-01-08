@@ -118,7 +118,9 @@ class FixerLoss:
         mask: Optional[torch.Tensor],
     ) -> torch.Tensor:
         mask = mask if mask is not None else None
-        correction = torch.mean(torch.abs(fixer_rgb - input_render), dim=0, keepdim=True)
+        correction = torch.mean(
+            torch.abs(fixer_rgb - input_render), dim=0, keepdim=True
+        )
         correction_mask = self._correction_mask(fixer_rgb, input_render, mask)
         weights = torch.exp(-self.cfg.gamma * correction)
         if mask is not None:

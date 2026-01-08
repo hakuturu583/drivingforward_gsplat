@@ -257,8 +257,8 @@ def _make_jittered_views(
             jittered_view["viewmat"] = new_viewmat
             jittered_view["world_view_transform"] = new_world_view
             jittered_view["is_jittered"] = True
-            if "input_render" in view:
-                jittered_view["raw_render_rgb"] = view["input_render"]
+            if "raw_render_rgb" in view:
+                jittered_view["raw_render_rgb"] = view["raw_render_rgb"]
             if "fixer_rgb" in view:
                 jittered_view["fixer_rgb"] = view["fixer_rgb"]
             jittered.append(jittered_view)
@@ -342,7 +342,6 @@ def optimize_gaussians(
             "viewmat",
             "world_view_transform",
             "fixer_rgb",
-            "input_render",
             "raw_render_rgb",
         ):
             if key in moved and torch.is_tensor(moved[key]):
@@ -542,7 +541,7 @@ def optimize_gaussians(
                     loss_raw_val = masked_mean(loss_raw, mask) * lambda_raw
                     loss = loss_raw_val
             else:
-                raw_render = view.get("raw_render_rgb", view.get("input_render"))
+                raw_render = view.get("raw_render_rgb")
                 fixer_rgb = view.get("fixer_rgb")
                 if fixer_rgb is not None and raw_render is not None:
                     loss_fix_val = lambda_fix * fixer_loss(
