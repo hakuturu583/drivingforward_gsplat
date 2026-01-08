@@ -256,6 +256,11 @@ def _make_jittered_views(
             jittered_view = dict(view)
             jittered_view["viewmat"] = new_viewmat
             jittered_view["world_view_transform"] = new_world_view
+            jittered_view["is_jittered"] = True
+            if "input_render" in view:
+                jittered_view["raw_render_rgb"] = view["input_render"]
+            if "fixer_rgb" in view:
+                jittered_view["fixer_rgb"] = view["fixer_rgb"]
             jittered.append(jittered_view)
     return jittered
 
@@ -519,18 +524,32 @@ def optimize_gaussians(
             loss_fix_val = torch.tensor(0.0, device=device)
             loss_sigma_val = torch.tensor(0.0, device=device)
             if view["type"] == "raw":
-                diff = rendered - view["rgb"]
-                loss_raw = charbonnier(diff)
-                loss_raw = torch.mean(loss_raw, dim=0, keepdim=True)
-                loss_raw_val = masked_mean(loss_raw, mask) * lambda_raw
-                loss = loss_raw_val
+                if view.get("is_jittered"):
+                    raw_render = rendered
+                    fixer_rgb = gs_render.postprocess_by_fixer(raw_render)
+                    loss_fix_val = lambda_fix * fixer_loss(
+                        rendered,
+                        fixer_rgb,
+                        raw_render,
+                        mask,
+                    )
+                    loss = loss_fix_val
+                else:
+                    diff = rendered - view["rgb"]
+                    loss_raw = charbonnier(diff)
+                    loss_raw = torch.mean(loss_raw, dim=0, keepdim=True)
+                    loss_raw_val = masked_mean(loss_raw, mask) * lambda_raw
+                    loss = loss_raw_val
             else:
-                loss_fix_val = lambda_fix * fixer_loss(
-                    rendered,
-                    view["fixer_rgb"],
-                    view["input_render"],
-                    mask,
-                )
+                raw_render = view.get("raw_render_rgb", view.get("input_render"))
+                fixer_rgb = view.get("fixer_rgb")
+                if fixer_rgb is not None and raw_render is not None:
+                    loss_fix_val = lambda_fix * fixer_loss(
+                        rendered,
+                        fixer_rgb,
+                        raw_render,
+                        mask,
+                    )
                 loss = loss_fix_val
 
             if lambda_sigma_min > 0 or lambda_sigma_max > 0:
