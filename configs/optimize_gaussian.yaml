@@ -11,13 +11,13 @@ phase_settings:
     jitter_views_per_cam: 2
     fixer_view_use_ratio: 0.1
     minscale_loss:
-      weight: 0.5
-      min_scale: 0.001
+      weight: 0.8
+      min_scale: 0.003
       max_scale: 0.08
       min_weight: 0.1
       max_weight: 3000.0
     scale_ratio_loss:
-      weight: 0.01
+      weight: 0.05
       max_ratio: 2.0
       gamma: 0.001
     opacity_sparsity_loss:
@@ -26,14 +26,14 @@ phase_settings:
       weight: 1.2
     fixer_loss:
       weight: 0.005
-      low_freq_weight: 0.5
+      low_freq_weight: 0.1
       lpips_weight: 0.1
       use_lpips: true
       lpips_net: vgg
       danger_percentile: 0.25
       blur_sigma: 1.5
       gamma: 5.0
-    jitter_cm: 0.05
+    jitter_cm: 0.03
   phase2:
     steps: 1000
     cam_count: 6
@@ -43,14 +43,14 @@ phase_settings:
       weight: 1.0
     fixer_loss:
       weight: 0.01
-      low_freq_weight: 0.5
+      low_freq_weight: 0.1
       lpips_weight: 0.1
       use_lpips: true
       lpips_net: vgg
       danger_percentile: 0.25
       blur_sigma: 1.5
       gamma: 5.0
-    jitter_cm: 10.0
+    jitter_cm: 5.0
   phase3:
     steps: 1000
     cam_count: 6
@@ -60,14 +60,14 @@ phase_settings:
       weight: 1.0
     fixer_loss:
       weight: 0.01
-      low_freq_weight: 0.5
+      low_freq_weight: 0.1
       lpips_weight: 0.1
       use_lpips: true
       lpips_net: vgg
       danger_percentile: 0.25
       blur_sigma: 1.5
       gamma: 5.0
-    jitter_cm: 15.0
+    jitter_cm: 8.0
 merge:
   every: 2000
   voxel_size: 0.002
