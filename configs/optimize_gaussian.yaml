@@ -13,20 +13,20 @@ phase_settings:
     minscale_loss:
       weight: 0.8
       min_scale: 0.0035
-      max_scale: 0.06
+      max_scale: 0.05
       min_weight: 0.1
       max_weight: 2000.0
     scale_ratio_loss:
-      weight: 0.04
+      weight: 0.03
       max_ratio: 2.0
       gamma: 0.001
     opacity_sparsity_loss:
-      weight: 0.0015
+      weight: 0.002
     photometric_loss:
       weight: 1.5
     fixer_loss:
       weight: 0.003
-      low_freq_weight: 0.1
+      low_freq_weight: 0.05
       lpips_weight: 0.1
       use_lpips: true
       lpips_net: vgg
@@ -43,7 +43,7 @@ phase_settings:
       weight: 1.2
     fixer_loss:
       weight: 0.006
-      low_freq_weight: 0.1
+      low_freq_weight: 0.05
       lpips_weight: 0.1
       use_lpips: true
       lpips_net: vgg
@@ -60,7 +60,7 @@ phase_settings:
       weight: 1.2
     fixer_loss:
       weight: 0.006
-      low_freq_weight: 0.1
+      low_freq_weight: 0.05
       lpips_weight: 0.1
       use_lpips: true
       lpips_net: vgg
