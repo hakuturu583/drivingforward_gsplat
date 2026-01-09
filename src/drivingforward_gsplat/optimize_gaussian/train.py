@@ -304,6 +304,7 @@ def _save_debug_images(
             opacities,
             shs,
         )
+        _save_debug_mask(cfg, f"{step_label}_{cam_name}", view)
     for view in views:
         if not view.get("is_jittered"):
             continue
@@ -319,6 +320,7 @@ def _save_debug_images(
             opacities,
             shs,
         )
+        _save_debug_mask(cfg, f"{step_label}_{cam_name}_{jitter_index}", view)
 
 
 def _populate_fixer_renders_for_jittered(
@@ -396,6 +398,20 @@ def _save_debug_image(
     )
     image_path = os.path.join(debug_root, f"{base_name}.png")
     to_pil_rgb(rendered).save(image_path)
+
+
+def _save_debug_mask(
+    cfg: OptimizeGaussianConfig,
+    base_name: str,
+    view: Dict,
+) -> None:
+    debug_root = os.path.join(cfg.output_dir, cfg.debug_dir_name)
+    os.makedirs(debug_root, exist_ok=True)
+    mask = view.get("mask")
+    if mask is None:
+        return
+    image_path = os.path.join(debug_root, f"{base_name}_mask.png")
+    to_pil_rgb(mask).save(image_path)
 
 
 def _save_debug_ply(
