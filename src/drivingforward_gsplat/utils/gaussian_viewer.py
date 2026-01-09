@@ -326,7 +326,9 @@ def _infer_sh_degree(sh: torch.Tensor) -> int | None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="View Gaussian splats from a PLY file.")
+    parser = argparse.ArgumentParser(
+        description="View Gaussian splats from a PLY file."
+    )
     parser.add_argument("ply", type=str, help="Path to a Gaussian PLY file.")
     parser.add_argument(
         "--port", type=int, default=8080, help="Port for the viewer server."
@@ -354,9 +356,7 @@ def main() -> None:
     if not ply_path.exists():
         raise FileNotFoundError(f"PLY file not found: {ply_path}")
 
-    means, quats, scales, opacities, shs = _load_gaussians_from_ply(
-        ply_path, device
-    )
+    means, quats, scales, opacities, shs = _load_gaussians_from_ply(ply_path, device)
     sh_degree = _infer_sh_degree(shs)
 
     @torch.no_grad()
@@ -408,9 +408,7 @@ def main() -> None:
         render_tab_state.total_gs_count = int(means.shape[0])
         radii = info.get("radii") if isinstance(info, dict) else None
         if radii is not None:
-            render_tab_state.rendered_gs_count = (
-                (radii > 0).all(-1).sum().item()
-            )
+            render_tab_state.rendered_gs_count = (radii > 0).all(-1).sum().item()
         else:
             render_tab_state.rendered_gs_count = 0
 

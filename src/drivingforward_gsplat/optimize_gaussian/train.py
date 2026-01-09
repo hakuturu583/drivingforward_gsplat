@@ -293,9 +293,10 @@ def _save_debug_images(
         if cam_idx not in views_by_cam:
             views_by_cam[cam_idx] = view
     for cam_idx, view in views_by_cam.items():
+        cam_name = _debug_cam_name(view)
         _save_debug_image(
             cfg,
-            f"{step_label}_cam{cam_idx}",
+            f"{step_label}_{cam_name}",
             view,
             means,
             rotations,
