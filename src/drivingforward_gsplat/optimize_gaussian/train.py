@@ -126,15 +126,15 @@ def _resolve_phase_loss(
     phase_id: str,
 ) -> Dict[str, float]:
     base = {
-        "photometric_loss_weight": 1.0,
-        "fixer_loss_weight": 0.02,
+        "photometric_loss_weight": 0.0,
+        "fixer_loss_weight": 0.0,
         "fixer_low_freq_weight": 1.0,
         "fixer_lpips_weight": 0.1,
-        "fixer_use_lpips": True,
+        "fixer_use_lpips": False,
         "fixer_lpips_net": "vgg",
-        "lambda_sigma_min": 0.1,
-        "lambda_sigma_max": 0.1,
-        "min_scale": 0.03,
+        "lambda_sigma_min": 0.0,
+        "lambda_sigma_max": 0.0,
+        "min_scale": 0.0,
         "max_scale": None,
         "opacity_sparsity_weight": 0.0,
         "scale_ratio_weight": 0.0,
@@ -156,7 +156,7 @@ def _resolve_phase_loss(
             base["fixer_use_lpips"] = (
                 phase_cfg.fixer_loss.use_lpips
                 if phase_cfg.fixer_loss.use_lpips is not None
-                else base["fixer_use_lpips"]
+                else True
             )
             base["fixer_lpips_net"] = (
                 phase_cfg.fixer_loss.lpips_net
@@ -620,6 +620,7 @@ def optimize_gaussians(
             )
 
             mask = view["mask"]
+            loss = None
             loss_raw_val = torch.tensor(0.0, device=device)
             loss_fix_val = torch.tensor(0.0, device=device)
             loss_sigma_val = torch.tensor(0.0, device=device)
@@ -627,31 +628,36 @@ def optimize_gaussians(
                 if view.get("is_jittered"):
                     raw_render = view.get("raw_render_rgb")
                     fixer_rgb = view.get("fixer_rgb")
-                    if raw_render is not None and fixer_rgb is not None:
+                    if (
+                        lambda_fix > 0
+                        and raw_render is not None
+                        and fixer_rgb is not None
+                    ):
                         loss_fix_val = lambda_fix * fixer_loss(
                             rendered,
                             fixer_rgb,
                             raw_render,
                             mask,
                         )
-                    loss = loss_fix_val
+                        loss = loss_fix_val if loss is None else loss + loss_fix_val
                 else:
-                    diff = rendered - view["rgb"]
-                    loss_raw = charbonnier(diff)
-                    loss_raw = torch.mean(loss_raw, dim=0, keepdim=True)
-                    loss_raw_val = masked_mean(loss_raw, mask) * lambda_raw
-                    loss = loss_raw_val
+                    if lambda_raw > 0:
+                        diff = rendered - view["rgb"]
+                        loss_raw = charbonnier(diff)
+                        loss_raw = torch.mean(loss_raw, dim=0, keepdim=True)
+                        loss_raw_val = masked_mean(loss_raw, mask) * lambda_raw
+                        loss = loss_raw_val if loss is None else loss + loss_raw_val
             else:
                 raw_render = view.get("raw_render_rgb")
                 fixer_rgb = view.get("fixer_rgb")
-                if fixer_rgb is not None and raw_render is not None:
+                if lambda_fix > 0 and fixer_rgb is not None and raw_render is not None:
                     loss_fix_val = lambda_fix * fixer_loss(
                         rendered,
                         fixer_rgb,
                         raw_render,
                         mask,
                     )
-                loss = loss_fix_val
+                    loss = loss_fix_val if loss is None else loss + loss_fix_val
 
             if lambda_sigma_min > 0 or lambda_sigma_max > 0:
                 min_loss = None
@@ -670,11 +676,12 @@ def optimize_gaussians(
                         loss_sigma_val = (
                             loss_sigma_val + lambda_sigma_max * max_loss[fg_mask].mean()
                         )
-                    loss = loss + loss_sigma_val
+                    loss = loss_sigma_val if loss is None else loss + loss_sigma_val
 
             if opacity_sparsity_weight > 0:
                 sparsity_loss = opacities.mean()
-                loss = loss + opacity_sparsity_weight * sparsity_loss
+                sparsity_term = opacity_sparsity_weight * sparsity_loss
+                loss = sparsity_term if loss is None else loss + sparsity_term
 
             if scale_ratio_weight > 0:
                 max_scale = scales.max(dim=1).values
@@ -684,7 +691,11 @@ def optimize_gaussians(
                 ratio_loss = torch.exp(scale_ratio_gamma * excess).clamp_max(1e6) - 1.0
                 if torch.any(fg_mask):
                     ratio_loss = ratio_loss[fg_mask].mean()
-                    loss = loss + scale_ratio_weight * ratio_loss
+                    ratio_term = scale_ratio_weight * ratio_loss
+                    loss = ratio_term if loss is None else loss + ratio_term
+
+            if loss is None:
+                continue
 
             for opt in optimizers.values():
                 opt.zero_grad(set_to_none=True)
