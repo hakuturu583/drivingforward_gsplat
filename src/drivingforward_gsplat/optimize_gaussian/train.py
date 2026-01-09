@@ -304,7 +304,7 @@ def _save_debug_images(
             opacities,
             shs,
         )
-        _save_debug_mask(cfg, f"{step_label}_{cam_name}", view)
+        _save_debug_fixer_diff(cfg, f"{step_label}_{cam_name}", view)
     for view in views:
         if not view.get("is_jittered"):
             continue
@@ -320,7 +320,7 @@ def _save_debug_images(
             opacities,
             shs,
         )
-        _save_debug_mask(cfg, f"{step_label}_{cam_name}_{jitter_index}", view)
+        _save_debug_fixer_diff(cfg, f"{step_label}_{cam_name}_{jitter_index}", view)
 
 
 def _populate_fixer_renders_for_jittered(
@@ -400,23 +400,21 @@ def _save_debug_image(
     to_pil_rgb(rendered).save(image_path)
 
 
-def _save_debug_mask(
+def _save_debug_fixer_diff(
     cfg: OptimizeGaussianConfig,
     base_name: str,
     view: Dict,
 ) -> None:
     debug_root = os.path.join(cfg.output_dir, cfg.debug_dir_name)
     os.makedirs(debug_root, exist_ok=True)
-    mask = view.get("mask")
-    if mask is None:
+    fixer_rgb = view.get("fixer_rgb")
+    raw_render = view.get("raw_render_rgb")
+    if fixer_rgb is None or raw_render is None:
         return
-    if torch.is_tensor(mask):
-        if mask.dim() == 2:
-            mask = mask.unsqueeze(0)
-        if mask.dim() == 3 and mask.shape[0] == 1:
-            mask = mask.repeat(3, 1, 1)
-    image_path = os.path.join(debug_root, f"{base_name}_mask.png")
-    to_pil_rgb(mask).save(image_path)
+    diff = torch.abs(fixer_rgb - raw_render)
+    diff = diff.clamp(0.0, 1.0)
+    image_path = os.path.join(debug_root, f"{base_name}_fixer_diff.png")
+    to_pil_rgb(diff).save(image_path)
 
 
 def _save_debug_ply(
