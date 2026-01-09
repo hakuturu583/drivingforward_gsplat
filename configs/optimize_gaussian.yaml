@@ -8,7 +8,7 @@ phase_settings:
   phase1:
     steps: 7999
     cam_count: 6
-    jitter_views_per_cam: 4
+    jitter_views_per_cam: 2
     fixer_view_use_ratio: 0.1
     minscale_loss:
       weight: 0.5
@@ -23,7 +23,16 @@ phase_settings:
     opacity_sparsity_loss:
       weight: 0.002
     photometric_loss:
-      weight: 1.5
+      weight: 1.2
+    fixer_loss:
+      weight: 0.01
+      low_freq_weight: 1.0
+      lpips_weight: 0.1
+      use_lpips: true
+      lpips_net: vgg
+      danger_percentile: 0.25
+      blur_sigma: 1.5
+      gamma: 5.0
     jitter_cm: 0.2
   phase2:
     steps: 1000
