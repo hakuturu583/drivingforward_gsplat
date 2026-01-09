@@ -410,6 +410,11 @@ def _save_debug_mask(
     mask = view.get("mask")
     if mask is None:
         return
+    if torch.is_tensor(mask):
+        if mask.dim() == 2:
+            mask = mask.unsqueeze(0)
+        if mask.dim() == 3 and mask.shape[0] == 1:
+            mask = mask.repeat(3, 1, 1)
     image_path = os.path.join(debug_root, f"{base_name}_mask.png")
     to_pil_rgb(mask).save(image_path)
 
