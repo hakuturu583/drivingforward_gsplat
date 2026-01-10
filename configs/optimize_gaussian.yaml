@@ -12,7 +12,7 @@ phase_settings:
     fixer_view_use_ratio: 0.1
     minscale_loss:
       weight: 0.8
-      min_scale: 0.0035
+      min_scale: 0.004
       max_scale: 0.06
       min_weight: 0.1
       max_weight: 2000.0
@@ -23,7 +23,7 @@ phase_settings:
     opacity_sparsity_loss:
       weight: 0.0015
     photometric_loss:
-      weight: 1.5
+      weight: 1.7
     fixer_loss:
       weight: 0.003
       low_freq_weight: 0.05
@@ -40,7 +40,7 @@ phase_settings:
     jitter_views_per_cam: 4
     fixer_view_use_ratio: 0.33
     photometric_loss:
-      weight: 1.2
+      weight: 1.4
     fixer_loss:
       weight: 0.006
       low_freq_weight: 0.05
@@ -57,7 +57,7 @@ phase_settings:
     jitter_views_per_cam: 4
     fixer_view_use_ratio: 0.33
     photometric_loss:
-      weight: 1.2
+      weight: 1.4
     fixer_loss:
       weight: 0.006
       low_freq_weight: 0.05
@@ -74,7 +74,7 @@ merge:
   voxel_size_distance_scale: 0.06
   small_scale: 0.01
   prune_scale: null
-  prune_thin_opacity: 0.025
+  prune_thin_opacity: 0.03
   color_bin: 0.005
 background_freeze_steps: null
 background_remove_step: null
