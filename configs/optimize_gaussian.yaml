@@ -54,8 +54,12 @@ phase_settings:
   phase3:
     steps: 1000
     cam_count: 6
-    jitter_views_per_cam: 4
+    jitter_views_per_cam: 2
     fixer_view_use_ratio: 0.33
+    scale_ratio_loss:
+      weight: 0.06
+      max_ratio: 1.5
+      gamma: 0.001
     photometric_loss:
       weight: 1.4
     fixer_loss:
