@@ -1,0 +1,56 @@
+predict:
+  model_config: configs/nuscenes/main.yaml
+  split: eval_MF
+  index: 0
+  torchscript_dir: torchscript
+  novel_view_mode: MF
+
+training:
+  device: cuda
+  steps: 500
+  lr: 0.01
+  seed: 0
+  log_every: 10
+  save_every: 100
+
+pose_jitter:
+  translation_m: 1.0
+  yaw_deg: 360.0
+  pitch_deg: 30.0
+  batch_size: 4
+  base_cameras:
+    - CAM_FRONT
+  background_color:
+    - 1.0
+    - 1.0
+    - 1.0
+
+clip_loss:
+  model_id: openai/clip-vit-base-patch32
+  prompts:
+    - "a bright road scene with sunset"
+  weight: 1.0
+  image_size: null
+
+edge_loss:
+  weight: 0.2
+  sigma: 1.0
+  low_threshold: 0.1
+  high_threshold: 0.2
+  soft_k: 10.0
+
+sh_reg:
+  weight: 0.01
+  degree_weights:
+    - 1.0
+    - 0.5
+    - 0.25
+    - 0.1
+    - 0.05
+  norm: l2
+
+output:
+  dir: output/clip_guidance
+  ply_name: optimized_inria.ply
+  save_initial: true
+  save_renders_every: 100

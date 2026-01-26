@@ -505,13 +505,13 @@ def optimize_gaussians(
                 if torch.any(fg_mask):
                     loss_sigma_val = torch.tensor(0.0, device=device)
                     if min_loss is not None:
-                        loss_sigma_val = loss_sigma_val + lambda_sigma_min * min_loss[
-                            fg_mask
-                        ].mean()
+                        loss_sigma_val = (
+                            loss_sigma_val + lambda_sigma_min * min_loss[fg_mask].mean()
+                        )
                     if max_loss is not None:
-                        loss_sigma_val = loss_sigma_val + lambda_sigma_max * max_loss[
-                            fg_mask
-                        ].mean()
+                        loss_sigma_val = (
+                            loss_sigma_val + lambda_sigma_max * max_loss[fg_mask].mean()
+                        )
                     loss = loss + loss_sigma_val
 
             if opacity_sparsity_weight > 0:
