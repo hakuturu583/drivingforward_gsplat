@@ -14,9 +14,9 @@ training:
   save_every: 100
 
 pose_jitter:
-  translation_m: 0.03
+  translation_m: 0.0
   yaw_deg: 360.0
-  pitch_deg: 15.0
+  pitch_deg: 0.0
   batch_size: 4
   base_cameras:
     - CAM_FRONT
@@ -33,14 +33,14 @@ clip_loss:
   image_size: null
 
 edge_loss:
-  weight: 0.1
-  sigma: 1.0
+  weight: 0.5
+  sigma: 0.5
   low_threshold: 0.1
   high_threshold: 0.2
-  soft_k: 10.0
+  soft_k: 20.0
 
 sh_reg:
-  weight: 1.0
+  weight: 0.3
   degree_weights:
     - 0.1
     - 0.3
@@ -48,6 +48,11 @@ sh_reg:
     - 0.8
     - 1.0
   norm: l2
+
+musiq_loss:
+  model_id: musiq
+  weight: 0.0
+  image_size: null
 
 output:
   dir: output/clip_guidance

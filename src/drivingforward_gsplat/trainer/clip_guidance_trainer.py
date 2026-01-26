@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import torch
 import torch.nn.functional as F
 import yaml
+import pyiqa
 from transformers import CLIPModel, CLIPTokenizer
 
 from drivingforward_gsplat.dataset import EnvNuScenesDataset, get_transforms
@@ -152,6 +153,22 @@ class ShRegConfig:
 
 
 @dataclass
+class MusiqLossConfig:
+    model_id: str = "musiq"
+    weight: float = 0.0
+    image_size: Optional[int] = None
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "MusiqLossConfig":
+        defaults = cls()
+        return cls(
+            model_id=data.get("model_id", defaults.model_id),
+            weight=float(data.get("weight", defaults.weight)),
+            image_size=data.get("image_size", defaults.image_size),
+        )
+
+
+@dataclass
 class OutputConfig:
     dir: str = "output/clip_guidance"
     ply_name: str = "optimized_inria.ply"
@@ -178,6 +195,7 @@ class ClipGuidanceConfig:
     clip_loss: ClipLossConfig = field(default_factory=ClipLossConfig)
     edge_loss: EdgeLossConfig = field(default_factory=EdgeLossConfig)
     sh_reg: ShRegConfig = field(default_factory=ShRegConfig)
+    musiq_loss: MusiqLossConfig = field(default_factory=MusiqLossConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
 
     @classmethod
@@ -191,6 +209,7 @@ class ClipGuidanceConfig:
             clip_loss=ClipLossConfig.from_dict(data.get("clip_loss", {})),
             edge_loss=EdgeLossConfig.from_dict(data.get("edge_loss", {})),
             sh_reg=ShRegConfig.from_dict(data.get("sh_reg", {})),
+            musiq_loss=MusiqLossConfig.from_dict(data.get("musiq_loss", {})),
             output=OutputConfig.from_dict(data.get("output", {})),
         )
 
@@ -417,6 +436,20 @@ def _preprocess_clip_images(
     return (images - mean) / std
 
 
+def _preprocess_musiq_images(
+    images: torch.Tensor,
+    image_size: Optional[int],
+) -> torch.Tensor:
+    if images.dim() == 3:
+        images = images.unsqueeze(0)
+    images = images.clamp(0.0, 1.0)
+    if image_size is not None:
+        images = F.interpolate(
+            images, size=(image_size, image_size), mode="bilinear", align_corners=False
+        )
+    return images
+
+
 def _make_sh_degree_weights(d_sh: int, weights: List[float]) -> torch.Tensor:
     degree = int(math.sqrt(d_sh) - 1)
     if (degree + 1) ** 2 != d_sh:
@@ -547,6 +580,13 @@ class ClipGuidanceTrainer:
             else int(clip_model.config.vision_config.image_size)
         )
 
+        musiq_metric = None
+        if self.cfg.musiq_loss.weight > 0:
+            musiq_metric = pyiqa.create_metric(
+                self.cfg.musiq_loss.model_id, device=self.device
+            )
+            musiq_metric.eval()
+
         sh_weight_map = _make_sh_degree_weights(
             shs.shape[1], self.cfg.sh_reg.degree_weights
         ).to(self.device, dtype=shs.dtype)
@@ -588,6 +628,15 @@ class ClipGuidanceTrainer:
             sims = image_features @ text_features.T
             clip_loss = 1.0 - sims.mean()
 
+            musiq_loss = torch.tensor(0.0, device=self.device)
+            musiq_score = None
+            if musiq_metric is not None:
+                musiq_inputs = _preprocess_musiq_images(
+                    rendered, self.cfg.musiq_loss.image_size
+                )
+                musiq_score = musiq_metric(musiq_inputs).mean()
+                musiq_loss = -musiq_score
+
             edge_loss = torch.tensor(0.0, device=self.device)
             if self.cfg.edge_loss.weight > 0:
                 edges_cur = _soft_canny(
@@ -615,6 +664,7 @@ class ClipGuidanceTrainer:
 
             total = (
                 self.cfg.clip_loss.weight * clip_loss
+                + self.cfg.musiq_loss.weight * musiq_loss
                 + self.cfg.edge_loss.weight * edge_loss
                 + self.cfg.sh_reg.weight * reg_loss
             )
@@ -622,12 +672,19 @@ class ClipGuidanceTrainer:
             optimizer.step()
 
             if step % self.cfg.training.log_every == 0 or step == 1:
+                musiq_str = (
+                    f" musiq={musiq_score.item():.4f}"
+                    if musiq_score is not None
+                    else ""
+                )
                 print(
                     f"[clip-guidance] step={step:05d} "
                     f"total={total.item():.4f} "
                     f"clip={clip_loss.item():.4f} "
+                    f"musiq_loss={musiq_loss.item():.4f} "
                     f"edge={edge_loss.item():.4f} "
                     f"sh_reg={reg_loss.item():.4f}"
+                    f"{musiq_str}"
                 )
 
             if (
