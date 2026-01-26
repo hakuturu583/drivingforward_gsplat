@@ -262,8 +262,9 @@ def _rotation_matrix_yaw_pitch(
     cp = math.cos(pitch_rad)
     sp = math.sin(pitch_rad)
 
+    # Camera-local yaw (about +Y) then pitch (about +X).
     rot_yaw = torch.tensor(
-        [[cy, -sy, 0.0], [sy, cy, 0.0], [0.0, 0.0, 1.0]],
+        [[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]],
         device=device,
         dtype=dtype,
     )
@@ -292,8 +293,9 @@ def _sample_pose(
     translation = torch.tensor([dx, 0.0, dz], device=device, dtype=dtype)
 
     new_viewmat = viewmat.clone()
+    # Apply rotation in camera-local coordinates; adjust translation consistently.
     new_viewmat[:3, :3] = rot_delta @ viewmat[:3, :3]
-    new_viewmat[:3, 3] = viewmat[:3, 3] + translation
+    new_viewmat[:3, 3] = rot_delta @ (viewmat[:3, 3] - translation)
     world_view = new_viewmat.transpose(0, 1)
 
     return {
@@ -650,6 +652,10 @@ class ClipGuidanceTrainer:
                     self.cfg.output.dir, f"render_{step:05d}.png"
                 )
                 to_pil_rgb(rendered[0].detach()).save(render_path)
+                init_render_path = os.path.join(
+                    self.cfg.output.dir, f"render_init_{step:05d}.png"
+                )
+                to_pil_rgb(rendered_init[0].detach()).save(init_render_path)
 
         final_path = os.path.join(self.cfg.output.dir, self.cfg.output.ply_name)
         save_gaussians_tensors_as_inria_ply(

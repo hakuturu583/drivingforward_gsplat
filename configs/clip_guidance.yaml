@@ -14,9 +14,9 @@ training:
   save_every: 100
 
 pose_jitter:
-  translation_m: 1.0
+  translation_m: 0.03
   yaw_deg: 360.0
-  pitch_deg: 30.0
+  pitch_deg: 15.0
   batch_size: 4
   base_cameras:
     - CAM_FRONT
@@ -29,24 +29,24 @@ clip_loss:
   model_id: openai/clip-vit-base-patch32
   prompts:
     - "a bright road scene with sunset"
-  weight: 1.0
+  weight: 0.001
   image_size: null
 
 edge_loss:
-  weight: 0.2
+  weight: 0.1
   sigma: 1.0
   low_threshold: 0.1
   high_threshold: 0.2
   soft_k: 10.0
 
 sh_reg:
-  weight: 0.01
+  weight: 1.0
   degree_weights:
-    - 1.0
-    - 0.5
-    - 0.25
     - 0.1
-    - 0.05
+    - 0.3
+    - 0.5
+    - 0.8
+    - 1.0
   norm: l2
 
 output:
