@@ -7,8 +7,8 @@ predict:
 
 training:
   device: cuda
-  steps: 500
-  lr: 0.01
+  steps: 1000
+  lr: 0.001
   seed: 0
   log_every: 10
   save_every: 100
@@ -33,14 +33,14 @@ clip_loss:
   image_size: null
 
 edge_loss:
-  weight: 0.5
-  sigma: 0.5
+  weight: 0.15
+  sigma: 0.7
   low_threshold: 0.1
   high_threshold: 0.2
-  soft_k: 20.0
+  soft_k: 5.0
 
 sh_reg:
-  weight: 0.3
+  weight: 0.1
   degree_weights:
     - 0.1
     - 0.3

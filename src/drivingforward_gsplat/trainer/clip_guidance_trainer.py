@@ -724,6 +724,21 @@ class ClipGuidanceTrainer:
             final_path,
         )
 
+        final_views = _build_base_views(
+            sample,
+            _resolve_cam_indices(CAM_ORDER),
+            self.cfg.pose_jitter.background_color,
+        )
+        final_renders = _render_views(
+            final_views, means, rotations, scales, opacities, shs
+        )
+        for view, image in zip(final_views, final_renders):
+            cam_name = CAM_ORDER[view["cam_idx"]]
+            render_path = os.path.join(
+                self.cfg.output.dir, f"render_final_{cam_name}.png"
+            )
+            to_pil_rgb(image.detach()).save(render_path)
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="CLIP-guided SH optimization trainer.")
