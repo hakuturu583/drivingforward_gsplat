@@ -1,6 +1,7 @@
 import argparse
 import math
 import os
+from pathlib import Path
 from typing import List, Optional, Sequence
 
 import numpy as np
@@ -492,10 +493,13 @@ def main():
     ]
     blended_segments = sdxl_panorama_i2i(i2i_cfg, images)
     os.makedirs(i2i_cfg.output_dir, exist_ok=True)
-    for cam_filename, segment in zip(cam_filenames, blended_segments):
+    for cam_filename, image, segment in zip(cam_filenames, images, blended_segments):
         out_path = _output_path_from_nuscenes_filename(i2i_cfg.output_dir, cam_filename)
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         segment.save(out_path)
+        raw_path = Path(out_path)
+        raw_path = raw_path.with_name(f"{raw_path.stem}_raw{raw_path.suffix}")
+        to_pil_rgb(image).save(raw_path)
 
 
 if __name__ == "__main__":
