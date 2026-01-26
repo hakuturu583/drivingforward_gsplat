@@ -7,7 +7,7 @@ predict:
 
 training:
   device: cuda
-  steps: 1000
+  steps: 5000
   lr: 0.001
   seed: 0
   log_every: 10
@@ -15,11 +15,16 @@ training:
 
 pose_jitter:
   translation_m: 0.0
-  yaw_deg: 360.0
+  yaw_deg: 20.0
   pitch_deg: 0.0
   batch_size: 4
   base_cameras:
     - CAM_FRONT
+    - CAM_FRONT_RIGHT
+    - CAM_FRONT_LEFT
+    - CAM_BACK_RIGHT
+    - CAM_BACK_LEFT
+    - CAM_BACK
   background_color:
     - 1.0
     - 1.0
@@ -34,19 +39,19 @@ clip_loss:
 
 edge_loss:
   weight: 0.15
-  sigma: 0.7
+  sigma: 0.5
   low_threshold: 0.1
   high_threshold: 0.2
   soft_k: 5.0
 
 sh_reg:
-  weight: 0.1
+  weight: 0.01
   degree_weights:
-    - 0.1
-    - 0.3
-    - 0.5
-    - 0.8
     - 1.0
+    - 0.8
+    - 0.5
+    - 0.3
+    - 0.1
   norm: l2
 
 musiq_loss:

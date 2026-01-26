@@ -602,6 +602,20 @@ class ClipGuidanceTrainer:
                 shs_init.detach(),
                 init_path,
             )
+            initial_views = _build_base_views(
+                sample,
+                _resolve_cam_indices(CAM_ORDER),
+                self.cfg.pose_jitter.background_color,
+            )
+            initial_renders = _render_views(
+                initial_views, means, rotations, scales, opacities, shs_init
+            )
+            for view, image in zip(initial_views, initial_renders):
+                cam_name = CAM_ORDER[view["cam_idx"]]
+                render_path = os.path.join(
+                    self.cfg.output.dir, f"render_initial_{cam_name}.png"
+                )
+                to_pil_rgb(image.detach()).save(render_path)
 
         for step in range(1, self.cfg.training.steps + 1):
             optimizer.zero_grad(set_to_none=True)
