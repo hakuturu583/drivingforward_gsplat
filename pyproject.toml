@@ -36,6 +36,7 @@ dependencies = [
     "docker>=7.1.0",
     "fixerpy>=0.1.0",
     "tqdm>=4.67.1",
+    "pyiqa>=0.1.10",
 ]
 
 [project.scripts]
