@@ -59,7 +59,7 @@ sh_reg:
 
 musiq_loss:
   model_id: musiq
-  weight: 0.01
+  weight: 0.1
   image_size: null
 
 output:
