@@ -17,8 +17,8 @@ training:
   save_every: 100
 
 pose_jitter:
-  translation_m: 0.0
-  yaw_deg: 10.0
+  translation_m: 0.1
+  yaw_deg: 0.0
   pitch_deg: 0.0
   batch_size: 4
   base_cameras:
@@ -43,9 +43,13 @@ clip_loss:
 edge_loss:
   weight: 0.1
   sigma: 0.4
-  low_threshold: 0.1
-  high_threshold: 0.2
-  soft_k: 5.0
+  low_threshold: 0.05
+  high_threshold: 0.12
+  render_low_threshold: 0.12
+  render_high_threshold: 0.2
+  ref_low_threshold: 0.1
+  ref_high_threshold: 0.2
+  soft_k: 3.0
 
 sh_reg:
   weight: 0.03

@@ -137,15 +137,37 @@ class EdgeLossConfig:
     sigma: float = 1.0
     low_threshold: float = 0.1
     high_threshold: float = 0.2
+    render_low_threshold: Optional[float] = None
+    render_high_threshold: Optional[float] = None
+    ref_low_threshold: Optional[float] = None
+    ref_high_threshold: Optional[float] = None
     soft_k: float = 10.0
 
     @classmethod
     def from_dict(cls, data: Dict) -> "EdgeLossConfig":
+        low = float(data.get("low_threshold", cls.low_threshold))
+        high = float(data.get("high_threshold", cls.high_threshold))
+        render_low = data.get("render_low_threshold")
+        render_high = data.get("render_high_threshold")
+        ref_low = data.get("ref_low_threshold")
+        ref_high = data.get("ref_high_threshold")
         return cls(
             weight=float(data.get("weight", cls.weight)),
             sigma=float(data.get("sigma", cls.sigma)),
-            low_threshold=float(data.get("low_threshold", cls.low_threshold)),
-            high_threshold=float(data.get("high_threshold", cls.high_threshold)),
+            low_threshold=low,
+            high_threshold=high,
+            render_low_threshold=(
+                float(render_low) if isinstance(render_low, (int, float)) else None
+            ),
+            render_high_threshold=(
+                float(render_high) if isinstance(render_high, (int, float)) else None
+            ),
+            ref_low_threshold=(
+                float(ref_low) if isinstance(ref_low, (int, float)) else None
+            ),
+            ref_high_threshold=(
+                float(ref_high) if isinstance(ref_high, (int, float)) else None
+            ),
             soft_k=float(data.get("soft_k", cls.soft_k)),
         )
 
@@ -686,19 +708,39 @@ class ClipGuidanceTrainer:
 
             edge_loss = torch.tensor(0.0, device=self.device)
             if self.cfg.edge_loss.weight > 0:
+                render_low = (
+                    self.cfg.edge_loss.render_low_threshold
+                    if self.cfg.edge_loss.render_low_threshold is not None
+                    else self.cfg.edge_loss.low_threshold
+                )
+                render_high = (
+                    self.cfg.edge_loss.render_high_threshold
+                    if self.cfg.edge_loss.render_high_threshold is not None
+                    else self.cfg.edge_loss.high_threshold
+                )
+                ref_low = (
+                    self.cfg.edge_loss.ref_low_threshold
+                    if self.cfg.edge_loss.ref_low_threshold is not None
+                    else self.cfg.edge_loss.low_threshold
+                )
+                ref_high = (
+                    self.cfg.edge_loss.ref_high_threshold
+                    if self.cfg.edge_loss.ref_high_threshold is not None
+                    else self.cfg.edge_loss.high_threshold
+                )
                 edges_cur = _soft_canny(
                     rendered,
                     self.cfg.edge_loss.sigma,
-                    self.cfg.edge_loss.low_threshold,
-                    self.cfg.edge_loss.high_threshold,
+                    render_low,
+                    render_high,
                     self.cfg.edge_loss.soft_k,
                 )
                 with torch.no_grad():
                     edges_init = _soft_canny(
                         rendered_init,
                         self.cfg.edge_loss.sigma,
-                        self.cfg.edge_loss.low_threshold,
-                        self.cfg.edge_loss.high_threshold,
+                        ref_low,
+                        ref_high,
                         self.cfg.edge_loss.soft_k,
                     )
                 edge_loss = F.l1_loss(edges_cur, edges_init)
