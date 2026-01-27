@@ -8,14 +8,17 @@ predict:
 training:
   device: cuda
   steps: 5000
-  lr: 0.001
+  # lr: 0.001
+  sh_lr: 0.001
+  opacity_lr: 0.0002
+  optimize_opacity: true
   seed: 0
   log_every: 10
   save_every: 100
 
 pose_jitter:
   translation_m: 0.0
-  yaw_deg: 20.0
+  yaw_deg: 10.0
   pitch_deg: 0.0
   batch_size: 4
   base_cameras:
@@ -38,25 +41,25 @@ clip_loss:
   image_size: null
 
 edge_loss:
-  weight: 0.15
-  sigma: 0.5
+  weight: 0.1
+  sigma: 0.4
   low_threshold: 0.1
   high_threshold: 0.2
   soft_k: 5.0
 
 sh_reg:
-  weight: 0.01
+  weight: 0.03
   degree_weights:
-    - 1.0
-    - 0.8
+    - 0.2
     - 0.5
-    - 0.3
-    - 0.1
+    - 1.0
+    - 1.5
+    - 2.0
   norm: l2
 
 musiq_loss:
   model_id: musiq
-  weight: 0.0
+  weight: 0.01
   image_size: null
 
 output:

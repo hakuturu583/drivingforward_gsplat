@@ -56,6 +56,9 @@ class TrainingConfig:
     device: str = "cuda"
     steps: int = 500
     lr: float = 1e-2
+    sh_lr: Optional[float] = None
+    opacity_lr: Optional[float] = None
+    optimize_opacity: bool = False
     seed: int = 0
     log_every: int = 10
     save_every: int = 100
@@ -66,6 +69,17 @@ class TrainingConfig:
             device=data.get("device", cls.device),
             steps=int(data.get("steps", cls.steps)),
             lr=float(data.get("lr", cls.lr)),
+            sh_lr=(
+                float(data["sh_lr"])
+                if isinstance(data.get("sh_lr"), (int, float))
+                else None
+            ),
+            opacity_lr=(
+                float(data["opacity_lr"])
+                if isinstance(data.get("opacity_lr"), (int, float))
+                else None
+            ),
+            optimize_opacity=bool(data.get("optimize_opacity", cls.optimize_opacity)),
             seed=int(data.get("seed", cls.seed)),
             log_every=int(data.get("log_every", cls.log_every)),
             save_every=int(data.get("save_every", cls.save_every)),
@@ -550,7 +564,26 @@ class ClipGuidanceTrainer:
         shs_init = shs_init.to(self.device)
 
         shs = torch.nn.Parameter(shs_init.clone())
-        optimizer = torch.optim.Adam([shs], lr=self.cfg.training.lr)
+        params = []
+        sh_lr = (
+            self.cfg.training.sh_lr
+            if self.cfg.training.sh_lr is not None
+            else self.cfg.training.lr
+        )
+        params.append({"params": [shs], "lr": sh_lr})
+
+        opacity_param = None
+        if self.cfg.training.optimize_opacity:
+            opacity_param = torch.nn.Parameter(opacities.clone())
+            opacities = opacity_param
+            opacity_lr = (
+                self.cfg.training.opacity_lr
+                if self.cfg.training.opacity_lr is not None
+                else self.cfg.training.lr
+            )
+            params.append({"params": [opacity_param], "lr": opacity_lr})
+
+        optimizer = torch.optim.Adam(params)
 
         cam_indices = _resolve_cam_indices(self.cfg.pose_jitter.base_cameras)
         base_views = _build_base_views(
@@ -684,21 +717,26 @@ class ClipGuidanceTrainer:
             )
             total.backward()
             optimizer.step()
+            if opacity_param is not None:
+                with torch.no_grad():
+                    opacities.clamp_(1e-4, 1.0 - 1e-4)
 
             if step % self.cfg.training.log_every == 0 or step == 1:
-                musiq_str = (
-                    f" musiq={musiq_score.item():.4f}"
-                    if musiq_score is not None
-                    else ""
-                )
+                clip_w = self.cfg.clip_loss.weight * clip_loss
+                musiq_w = self.cfg.musiq_loss.weight * musiq_loss
+                edge_w = self.cfg.edge_loss.weight * edge_loss
+                sh_w = self.cfg.sh_reg.weight * reg_loss
                 print(
                     f"[clip-guidance] step={step:05d} "
                     f"total={total.item():.4f} "
-                    f"clip={clip_loss.item():.4f} "
-                    f"musiq_loss={musiq_loss.item():.4f} "
-                    f"edge={edge_loss.item():.4f} "
-                    f"sh_reg={reg_loss.item():.4f}"
-                    f"{musiq_str}"
+                    f"clip={clip_loss.item():.4f}*{self.cfg.clip_loss.weight:.4f}"
+                    f"={clip_w.item():.4f} "
+                    f"musiq_loss={musiq_loss.item():.4f}*"
+                    f"{self.cfg.musiq_loss.weight:.4f}={musiq_w.item():.4f} "
+                    f"edge={edge_loss.item():.4f}*{self.cfg.edge_loss.weight:.4f}"
+                    f"={edge_w.item():.4f} "
+                    f"sh_reg={reg_loss.item():.4f}*{self.cfg.sh_reg.weight:.4f}"
+                    f"={sh_w.item():.4f}"
                 )
 
             if (
