@@ -7,9 +7,9 @@ predict:
 
 training:
   device: cuda
-  steps: 5000
+  steps: 1000
   # lr: 0.001
-  sh_lr: 0.001
+  sh_lr: 0.005
   opacity_lr: 0.0002
   optimize_opacity: true
   seed: 0
@@ -18,9 +18,9 @@ training:
 
 pose_jitter:
   translation_m: 0.1
-  yaw_deg: 0.0
+  yaw_deg: 5.0
   pitch_deg: 0.0
-  batch_size: 4
+  batch_size: 32
   base_cameras:
     - CAM_FRONT
     - CAM_FRONT_RIGHT
@@ -36,7 +36,7 @@ pose_jitter:
 clip_loss:
   model_id: openai/clip-vit-base-patch32
   prompts:
-    - "a bright road scene with sunset"
+    - "sunset"
   weight: 0.001
   image_size: null
 
@@ -49,21 +49,21 @@ edge_loss:
   render_high_threshold: 0.2
   ref_low_threshold: 0.1
   ref_high_threshold: 0.2
-  soft_k: 3.0
+  soft_k: 5.0
 
 sh_reg:
-  weight: 0.03
+  weight: 0.1
   degree_weights:
     - 0.2
     - 0.5
     - 1.0
-    - 1.5
     - 2.0
+    - 3.0
   norm: l2
 
 musiq_loss:
   model_id: musiq
-  weight: 0.1
+  weight: 1.0
   image_size: null
 
 output:
