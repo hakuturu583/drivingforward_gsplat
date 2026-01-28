@@ -421,6 +421,13 @@ class ClipGuidanceTrainer:
             self.cfg.clip_loss.prompts,
             self.cfg.clip_loss.image_size,
             self.device,
+            sample[("color", 0, 0)],
+            CAM_ORDER,
+            self.cfg.clip_loss.seed,
+            self.cfg.output.dir,
+            self.cfg.clip_loss.i2i_num_inference_steps,
+            self.cfg.clip_loss.i2i_guidance_scale,
+            self.cfg.clip_loss.i2i_image_guidance_scale,
         )
         edge_loss_fn = EdgeLoss(
             sigma=self.cfg.edge_loss.sigma,
@@ -490,7 +497,8 @@ class ClipGuidanceTrainer:
                     views, means, rotations, scales, opacities, shs_init
                 )
 
-            clip_loss = clip_loss_fn.compute(rendered)
+            cam_indices = [view["cam_idx"] for view in views]
+            clip_loss = clip_loss_fn.compute(rendered, cam_indices)
 
             musiq_loss = torch.tensor(0.0, device=self.device)
             if musiq_loss_fn is not None:
