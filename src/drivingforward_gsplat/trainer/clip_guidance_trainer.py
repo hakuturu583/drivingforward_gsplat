@@ -8,11 +8,18 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import torch
-import torch.nn.functional as F
 import yaml
-import pyiqa
-from transformers import CLIPModel, CLIPTokenizer
 
+from drivingforward_gsplat.clip_guidance.loss import (
+    ClipLoss,
+    ClipLossConfig,
+    EdgeLoss,
+    EdgeLossConfig,
+    MusiqLoss,
+    MusiqLossConfig,
+    ShRegConfig,
+    ShRegLoss,
+)
 from drivingforward_gsplat.dataset import EnvNuScenesDataset, get_transforms
 from drivingforward_gsplat.models.gaussian import rendering as gs_render
 from drivingforward_gsplat.predict_gaussian import (
@@ -27,9 +34,6 @@ from drivingforward_gsplat.utils.gaussian_ply import (
     save_gaussians_tensors_as_inria_ply,
 )
 from drivingforward_gsplat.utils.misc import get_config, to_pil_rgb
-
-_CLIP_MEAN = (0.48145466, 0.4578275, 0.40821073)
-_CLIP_STD = (0.26862954, 0.26130258, 0.27577711)
 
 
 @dataclass
@@ -107,100 +111,6 @@ class PoseJitterConfig:
             background_color=list(
                 data.get("background_color", defaults.background_color)
             ),
-        )
-
-
-@dataclass
-class ClipLossConfig:
-    model_id: str = "openai/clip-vit-base-patch32"
-    prompts: List[str] = field(default_factory=list)
-    weight: float = 1.0
-    image_size: Optional[int] = None
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> "ClipLossConfig":
-        defaults = cls()
-        prompts = data.get("prompts", defaults.prompts)
-        if isinstance(prompts, str):
-            prompts = [prompts]
-        return cls(
-            model_id=data.get("model_id", defaults.model_id),
-            prompts=list(prompts),
-            weight=float(data.get("weight", defaults.weight)),
-            image_size=data.get("image_size", defaults.image_size),
-        )
-
-
-@dataclass
-class EdgeLossConfig:
-    weight: float = 0.2
-    sigma: float = 1.0
-    low_threshold: float = 0.1
-    high_threshold: float = 0.2
-    render_low_threshold: Optional[float] = None
-    render_high_threshold: Optional[float] = None
-    ref_low_threshold: Optional[float] = None
-    ref_high_threshold: Optional[float] = None
-    soft_k: float = 10.0
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> "EdgeLossConfig":
-        low = float(data.get("low_threshold", cls.low_threshold))
-        high = float(data.get("high_threshold", cls.high_threshold))
-        render_low = data.get("render_low_threshold")
-        render_high = data.get("render_high_threshold")
-        ref_low = data.get("ref_low_threshold")
-        ref_high = data.get("ref_high_threshold")
-        return cls(
-            weight=float(data.get("weight", cls.weight)),
-            sigma=float(data.get("sigma", cls.sigma)),
-            low_threshold=low,
-            high_threshold=high,
-            render_low_threshold=(
-                float(render_low) if isinstance(render_low, (int, float)) else None
-            ),
-            render_high_threshold=(
-                float(render_high) if isinstance(render_high, (int, float)) else None
-            ),
-            ref_low_threshold=(
-                float(ref_low) if isinstance(ref_low, (int, float)) else None
-            ),
-            ref_high_threshold=(
-                float(ref_high) if isinstance(ref_high, (int, float)) else None
-            ),
-            soft_k=float(data.get("soft_k", cls.soft_k)),
-        )
-
-
-@dataclass
-class ShRegConfig:
-    weight: float = 0.01
-    degree_weights: List[float] = field(default_factory=list)
-    norm: str = "l2"
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> "ShRegConfig":
-        defaults = cls()
-        return cls(
-            weight=float(data.get("weight", defaults.weight)),
-            degree_weights=list(data.get("degree_weights", defaults.degree_weights)),
-            norm=str(data.get("norm", defaults.norm)),
-        )
-
-
-@dataclass
-class MusiqLossConfig:
-    model_id: str = "musiq"
-    weight: float = 0.0
-    image_size: Optional[int] = None
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> "MusiqLossConfig":
-        defaults = cls()
-        return cls(
-            model_id=data.get("model_id", defaults.model_id),
-            weight=float(data.get("weight", defaults.weight)),
-            image_size=data.get("image_size", defaults.image_size),
         )
 
 
@@ -399,112 +309,6 @@ def _render_views(
     return torch.stack(rendered, dim=0)
 
 
-def _gaussian_kernel(
-    sigma: float, device: torch.device, dtype: torch.dtype
-) -> torch.Tensor:
-    if sigma <= 0:
-        return torch.tensor([[1.0]], device=device, dtype=dtype)
-    radius = max(1, int(math.ceil(3.0 * sigma)))
-    size = radius * 2 + 1
-    coords = torch.arange(size, device=device, dtype=dtype) - radius
-    kernel_1d = torch.exp(-(coords ** 2) / (2 * sigma * sigma))
-    kernel_1d = kernel_1d / kernel_1d.sum()
-    kernel_2d = kernel_1d[:, None] * kernel_1d[None, :]
-    return kernel_2d
-
-
-def _soft_canny(
-    images: torch.Tensor,
-    sigma: float,
-    low: float,
-    high: float,
-    soft_k: float,
-) -> torch.Tensor:
-    if images.dim() == 3:
-        images = images.unsqueeze(0)
-    gray = 0.2989 * images[:, 0:1] + 0.5870 * images[:, 1:2] + 0.1140 * images[:, 2:3]
-    device = gray.device
-    dtype = gray.dtype
-    if sigma > 0:
-        kernel = _gaussian_kernel(sigma, device, dtype)
-        kernel = kernel.view(1, 1, kernel.shape[0], kernel.shape[1])
-        padding = kernel.shape[-1] // 2
-        gray = F.conv2d(gray, kernel, padding=padding)
-
-    sobel_x = torch.tensor(
-        [[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]],
-        device=device,
-        dtype=dtype,
-    ).view(1, 1, 3, 3)
-    sobel_y = torch.tensor(
-        [[-1.0, -2.0, -1.0], [0.0, 0.0, 0.0], [1.0, 2.0, 1.0]],
-        device=device,
-        dtype=dtype,
-    ).view(1, 1, 3, 3)
-    dx = F.conv2d(gray, sobel_x, padding=1)
-    dy = F.conv2d(gray, sobel_y, padding=1)
-    mag = torch.sqrt(dx ** 2 + dy ** 2 + 1e-6)
-    mag = mag / (mag.amax(dim=(-2, -1), keepdim=True) + 1e-6)
-
-    low_mask = torch.sigmoid((mag - low) * soft_k)
-    high_mask = torch.sigmoid((mag - high) * soft_k)
-    high_dilate = F.max_pool2d(high_mask, kernel_size=3, stride=1, padding=1)
-    edges = high_mask + (1.0 - high_mask) * low_mask * high_dilate
-    return edges
-
-
-def _preprocess_clip_images(
-    images: torch.Tensor,
-    image_size: int,
-) -> torch.Tensor:
-    if images.dim() == 3:
-        images = images.unsqueeze(0)
-    images = images.clamp(0.0, 1.0)
-    images = F.interpolate(
-        images, size=(image_size, image_size), mode="bilinear", align_corners=False
-    )
-    mean = torch.tensor(_CLIP_MEAN, device=images.device, dtype=images.dtype).view(
-        1, 3, 1, 1
-    )
-    std = torch.tensor(_CLIP_STD, device=images.device, dtype=images.dtype).view(
-        1, 3, 1, 1
-    )
-    return (images - mean) / std
-
-
-def _preprocess_musiq_images(
-    images: torch.Tensor,
-    image_size: Optional[int],
-) -> torch.Tensor:
-    if images.dim() == 3:
-        images = images.unsqueeze(0)
-    images = images.clamp(0.0, 1.0)
-    if image_size is not None:
-        images = F.interpolate(
-            images, size=(image_size, image_size), mode="bilinear", align_corners=False
-        )
-    return images
-
-
-def _make_sh_degree_weights(d_sh: int, weights: List[float]) -> torch.Tensor:
-    degree = int(math.sqrt(d_sh) - 1)
-    if (degree + 1) ** 2 != d_sh:
-        degree = max(degree, 0)
-    if not weights:
-        weights = [1.0] * (degree + 1)
-    if len(weights) < degree + 1:
-        weights = weights + [weights[-1]] * (degree + 1 - len(weights))
-    if len(weights) > degree + 1:
-        weights = weights[: degree + 1]
-
-    weight_map = torch.ones(d_sh, dtype=torch.float32)
-    for l in range(degree + 1):
-        start = l * l
-        end = (l + 1) * (l + 1)
-        weight_map[start:end] = float(weights[l])
-    return weight_map
-
-
 def _ensure_shs_layout(shs: torch.Tensor) -> torch.Tensor:
     if shs.dim() != 3:
         return shs
@@ -612,39 +416,34 @@ class ClipGuidanceTrainer:
             sample, cam_indices, self.cfg.pose_jitter.background_color
         )
 
-        clip_model = CLIPModel.from_pretrained(self.cfg.clip_loss.model_id).to(
-            self.device
-        )
-        clip_model.eval()
-        tokenizer = CLIPTokenizer.from_pretrained(self.cfg.clip_loss.model_id)
-        if not self.cfg.clip_loss.prompts:
-            raise ValueError("clip_loss.prompts must contain at least one prompt.")
-        text_inputs = tokenizer(
+        clip_loss_fn = ClipLoss(
+            self.cfg.clip_loss.model_id,
             self.cfg.clip_loss.prompts,
-            padding=True,
-            return_tensors="pt",
+            self.cfg.clip_loss.image_size,
+            self.device,
         )
-        text_inputs = {k: v.to(self.device) for k, v in text_inputs.items()}
-        with torch.no_grad():
-            text_features = clip_model.get_text_features(**text_inputs)
-            text_features = F.normalize(text_features, dim=-1)
-
-        image_size = (
-            self.cfg.clip_loss.image_size
-            if self.cfg.clip_loss.image_size is not None
-            else int(clip_model.config.vision_config.image_size)
+        edge_loss_fn = EdgeLoss(
+            sigma=self.cfg.edge_loss.sigma,
+            low_threshold=self.cfg.edge_loss.low_threshold,
+            high_threshold=self.cfg.edge_loss.high_threshold,
+            soft_k=self.cfg.edge_loss.soft_k,
+            render_low_threshold=self.cfg.edge_loss.render_low_threshold,
+            render_high_threshold=self.cfg.edge_loss.render_high_threshold,
+            ref_low_threshold=self.cfg.edge_loss.ref_low_threshold,
+            ref_high_threshold=self.cfg.edge_loss.ref_high_threshold,
         )
-
-        musiq_metric = None
+        musiq_loss_fn = None
         if self.cfg.musiq_loss.weight > 0:
-            musiq_metric = pyiqa.create_metric(
-                self.cfg.musiq_loss.model_id, device=self.device
+            musiq_loss_fn = MusiqLoss(
+                self.cfg.musiq_loss.model_id,
+                self.cfg.musiq_loss.image_size,
+                self.device,
             )
-            musiq_metric.eval()
-
-        sh_weight_map = _make_sh_degree_weights(
-            shs.shape[1], self.cfg.sh_reg.degree_weights
-        ).to(self.device, dtype=shs.dtype)
+        sh_reg_fn = ShRegLoss(
+            self.cfg.sh_reg.degree_weights,
+            self.cfg.sh_reg.norm,
+            self.device,
+        )
 
         os.makedirs(self.cfg.output.dir, exist_ok=True)
         if self.cfg.output.save_initial:
@@ -691,65 +490,17 @@ class ClipGuidanceTrainer:
                     views, means, rotations, scales, opacities, shs_init
                 )
 
-            clip_inputs = _preprocess_clip_images(rendered, image_size)
-            image_features = clip_model.get_image_features(pixel_values=clip_inputs)
-            image_features = F.normalize(image_features, dim=-1)
-            sims = image_features @ text_features.T
-            clip_loss = 1.0 - sims.mean()
+            clip_loss = clip_loss_fn.compute(rendered)
 
             musiq_loss = torch.tensor(0.0, device=self.device)
-            musiq_score = None
-            if musiq_metric is not None:
-                musiq_inputs = _preprocess_musiq_images(
-                    rendered, self.cfg.musiq_loss.image_size
-                )
-                musiq_score = musiq_metric(musiq_inputs).mean()
-                musiq_loss = -musiq_score
+            if musiq_loss_fn is not None:
+                musiq_loss = musiq_loss_fn.compute(rendered)
 
             edge_loss = torch.tensor(0.0, device=self.device)
             if self.cfg.edge_loss.weight > 0:
-                render_low = (
-                    self.cfg.edge_loss.render_low_threshold
-                    if self.cfg.edge_loss.render_low_threshold is not None
-                    else self.cfg.edge_loss.low_threshold
-                )
-                render_high = (
-                    self.cfg.edge_loss.render_high_threshold
-                    if self.cfg.edge_loss.render_high_threshold is not None
-                    else self.cfg.edge_loss.high_threshold
-                )
-                ref_low = (
-                    self.cfg.edge_loss.ref_low_threshold
-                    if self.cfg.edge_loss.ref_low_threshold is not None
-                    else self.cfg.edge_loss.low_threshold
-                )
-                ref_high = (
-                    self.cfg.edge_loss.ref_high_threshold
-                    if self.cfg.edge_loss.ref_high_threshold is not None
-                    else self.cfg.edge_loss.high_threshold
-                )
-                edges_cur = _soft_canny(
-                    rendered,
-                    self.cfg.edge_loss.sigma,
-                    render_low,
-                    render_high,
-                    self.cfg.edge_loss.soft_k,
-                )
-                with torch.no_grad():
-                    edges_init = _soft_canny(
-                        rendered_init,
-                        self.cfg.edge_loss.sigma,
-                        ref_low,
-                        ref_high,
-                        self.cfg.edge_loss.soft_k,
-                    )
-                edge_loss = F.l1_loss(edges_cur, edges_init)
+                edge_loss = edge_loss_fn.compute(rendered, rendered_init)
 
-            delta = shs - shs_init
-            if self.cfg.sh_reg.norm.lower() == "l1":
-                reg_loss = (delta.abs() * sh_weight_map[None, :, None]).mean()
-            else:
-                reg_loss = (delta.pow(2) * sh_weight_map[None, :, None]).mean()
+            reg_loss = sh_reg_fn.compute(shs, shs_init)
 
             total = (
                 self.cfg.clip_loss.weight * clip_loss
