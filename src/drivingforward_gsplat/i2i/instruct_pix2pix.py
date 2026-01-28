@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import Optional
 
 import torch
@@ -58,21 +59,28 @@ def instruct_pix2pix_i2i(
             pass
 
     if isinstance(seed, list):
-        images = []
-        for current_seed in seed:
-            generator = torch.Generator(device=device).manual_seed(current_seed)
-            with torch.inference_mode():
-                result = pipe(
-                    prompt=prompt,
-                    negative_prompt=negative_prompt,
-                    image=image,
-                    num_inference_steps=num_inference_steps,
-                    guidance_scale=guidance_scale,
-                    image_guidance_scale=image_guidance_scale,
-                    generator=generator,
-                )
-            images.append(result.images[0])
-        return images
+        if not seed:
+            warnings.warn(
+                "instruct_pix2pix_i2i received an empty seed list; treating as None.",
+                RuntimeWarning,
+            )
+            seed = None
+        else:
+            images = []
+            for current_seed in seed:
+                generator = torch.Generator(device=device).manual_seed(current_seed)
+                with torch.inference_mode():
+                    result = pipe(
+                        prompt=prompt,
+                        negative_prompt=negative_prompt,
+                        image=image,
+                        num_inference_steps=num_inference_steps,
+                        guidance_scale=guidance_scale,
+                        image_guidance_scale=image_guidance_scale,
+                        generator=generator,
+                    )
+                images.append(result.images[0])
+            return images
 
     generator = None
     if seed is not None:
