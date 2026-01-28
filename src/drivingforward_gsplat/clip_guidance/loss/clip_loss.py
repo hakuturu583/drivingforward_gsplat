@@ -109,10 +109,9 @@ class ClipLoss:
             else int(self.model.config.vision_config.image_size)
         )
         prompt = ", ".join(prompts)
-        if len(reference_images) != len(camera_names):
-            raise ValueError(
-                "reference_images and camera_names must have the same length."
-            )
+        reference_images, camera_names = self._normalize_reference_inputs(
+            reference_images, camera_names
+        )
         self._target_features = self._build_target_features(
             reference_images,
             camera_names,
@@ -142,6 +141,8 @@ class ClipLoss:
     ) -> dict[int, torch.Tensor]:
         target_features: dict[int, torch.Tensor] = {}
         torch_dtype = torch.float16 if self.device.type == "cuda" else torch.float32
+        if isinstance(seed, list) and not seed:
+            seed = None
         for cam_idx, image in enumerate(reference_images):
             pil_image = to_pil_rgb(image)
             edited = instruct_pix2pix_i2i(
@@ -160,12 +161,12 @@ class ClipLoss:
                 cam_name = camera_names[cam_idx]
                 cam_dir = os.path.join(output_dir, "i2i", cam_name)
                 os.makedirs(cam_dir, exist_ok=True)
-                if isinstance(seed, list):
-                    seeds = seed
-                elif seed is None:
+                if seed is None:
                     seeds = [None] * len(edited_images)
                 else:
-                    seeds = [seed] * len(edited_images)
+                    seeds = (
+                        seed if isinstance(seed, list) else [seed] * len(edited_images)
+                    )
                 for idx, (img, seed_value) in enumerate(zip(edited_images, seeds)):
                     if seed_value is None:
                         name = f"seed_none_{idx:02d}.png"
@@ -181,6 +182,33 @@ class ClipLoss:
                 features = self._encode_images(batch)
                 target_features[cam_idx] = features.mean(dim=0)
         return target_features
+
+    @staticmethod
+    def _normalize_reference_inputs(
+        reference_images: Sequence[torch.Tensor | Image.Image | np.ndarray]
+        | torch.Tensor,
+        camera_names: Sequence[str],
+    ) -> tuple[List[torch.Tensor | Image.Image | np.ndarray], List[str]]:
+        if torch.is_tensor(reference_images):
+            images = reference_images
+            if images.dim() == 5 and images.shape[0] == 1:
+                images = images.squeeze(0)
+            if images.dim() == 4:
+                image_list = [images[idx] for idx in range(images.shape[0])]
+            elif images.dim() == 3:
+                image_list = [images]
+            else:
+                raise ValueError(
+                    "reference_images tensor must be 3D or 4D (optionally with batch)."
+                )
+        else:
+            image_list = list(reference_images)
+        if len(camera_names) < len(image_list):
+            raise ValueError(
+                "camera_names length must be >= number of reference_images."
+            )
+        camera_list = list(camera_names[: len(image_list)])
+        return image_list, camera_list
 
     def compute(self, images: torch.Tensor, cam_indices: Sequence[int]) -> torch.Tensor:
         if images.dim() == 3:
