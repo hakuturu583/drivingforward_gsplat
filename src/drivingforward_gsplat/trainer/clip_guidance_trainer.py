@@ -139,7 +139,26 @@ class OutputConfig:
 
 
 @dataclass
-class StepConfig:
+class Step1Config:
+    training: TrainingConfig = field(default_factory=TrainingConfig)
+    i2i: ClipLossConfig = field(default_factory=ClipLossConfig)
+    edge_select: EdgeLossConfig = field(default_factory=EdgeLossConfig)
+    background_color: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.0])
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "Step1Config":
+        return cls(
+            training=TrainingConfig.from_dict(data.get("training", {})),
+            i2i=ClipLossConfig.from_dict(data.get("i2i", {})),
+            edge_select=EdgeLossConfig.from_dict(data.get("edge_select", {})),
+            background_color=list(
+                data.get("background_color", cls().background_color)
+            ),
+        )
+
+
+@dataclass
+class Step2Config:
     training: TrainingConfig = field(default_factory=TrainingConfig)
     pose_jitter: PoseJitterConfig = field(default_factory=PoseJitterConfig)
     clip_loss: ClipLossConfig = field(default_factory=ClipLossConfig)
@@ -148,7 +167,7 @@ class StepConfig:
     musiq_loss: MusiqLossConfig = field(default_factory=MusiqLossConfig)
 
     @classmethod
-    def from_dict(cls, data: Dict) -> "StepConfig":
+    def from_dict(cls, data: Dict) -> "Step2Config":
         return cls(
             training=TrainingConfig.from_dict(data.get("training", {})),
             pose_jitter=PoseJitterConfig.from_dict(data.get("pose_jitter", {})),
@@ -162,8 +181,8 @@ class StepConfig:
 @dataclass
 class ClipGuidanceConfig:
     predict: PredictConfig = field(default_factory=PredictConfig)
-    step1: StepConfig = field(default_factory=StepConfig)
-    step2: StepConfig = field(default_factory=StepConfig)
+    step1: Step1Config = field(default_factory=Step1Config)
+    step2: Step2Config = field(default_factory=Step2Config)
     output: OutputConfig = field(default_factory=OutputConfig)
 
     @classmethod
@@ -172,8 +191,8 @@ class ClipGuidanceConfig:
             data = yaml.safe_load(f) or {}
         return cls(
             predict=PredictConfig.from_dict(data.get("predict", {})),
-            step1=StepConfig.from_dict(data.get("step1", {})),
-            step2=StepConfig.from_dict(data.get("step2", {})),
+            step1=Step1Config.from_dict(data.get("step1", {})),
+            step2=Step2Config.from_dict(data.get("step2", {})),
             output=OutputConfig.from_dict(data.get("output", {})),
         )
 
@@ -515,33 +534,33 @@ class ClipGuidanceTrainer:
         os.makedirs(step1_dir, exist_ok=True)
         os.makedirs(step2_dir, exist_ok=True)
 
-        prompt = ", ".join(step1_cfg.clip_loss.prompts)
+        prompt = ", ".join(step1_cfg.i2i.prompts)
         i2i_images_by_cam = _generate_i2i_images(
             reference_images=sample[("color", 0, 0)],
             camera_names=CAM_ORDER,
             prompt=prompt,
             device=self.device,
-            seed=step1_cfg.clip_loss.seed,
+            seed=step1_cfg.i2i.seed,
             output_dir=self.cfg.output.dir,
-            num_inference_steps=step1_cfg.clip_loss.i2i_num_inference_steps,
-            guidance_scale=step1_cfg.clip_loss.i2i_guidance_scale,
-            image_guidance_scale=step1_cfg.clip_loss.i2i_image_guidance_scale,
+            num_inference_steps=step1_cfg.i2i.i2i_num_inference_steps,
+            guidance_scale=step1_cfg.i2i.i2i_guidance_scale,
+            image_guidance_scale=step1_cfg.i2i.i2i_image_guidance_scale,
         )
 
-        step1_cam_indices = _resolve_cam_indices(step1_cfg.pose_jitter.base_cameras)
+        step1_cam_indices = _resolve_cam_indices(CAM_ORDER)
         step1_views = _build_base_views(
-            sample, step1_cam_indices, step1_cfg.pose_jitter.background_color
+            sample, step1_cam_indices, step1_cfg.background_color
         )
 
         edge_loss_fn_step1 = EdgeLoss(
-            sigma=step1_cfg.edge_loss.sigma,
-            low_threshold=step1_cfg.edge_loss.low_threshold,
-            high_threshold=step1_cfg.edge_loss.high_threshold,
-            soft_k=step1_cfg.edge_loss.soft_k,
-            render_low_threshold=step1_cfg.edge_loss.render_low_threshold,
-            render_high_threshold=step1_cfg.edge_loss.render_high_threshold,
-            ref_low_threshold=step1_cfg.edge_loss.ref_low_threshold,
-            ref_high_threshold=step1_cfg.edge_loss.ref_high_threshold,
+            sigma=step1_cfg.edge_select.sigma,
+            low_threshold=step1_cfg.edge_select.low_threshold,
+            high_threshold=step1_cfg.edge_select.high_threshold,
+            soft_k=step1_cfg.edge_select.soft_k,
+            render_low_threshold=step1_cfg.edge_select.render_low_threshold,
+            render_high_threshold=step1_cfg.edge_select.render_high_threshold,
+            ref_low_threshold=step1_cfg.edge_select.ref_low_threshold,
+            ref_high_threshold=step1_cfg.edge_select.ref_high_threshold,
         )
         (
             render_low,
@@ -549,20 +568,43 @@ class ClipGuidanceTrainer:
             ref_low,
             ref_high,
         ) = edge_loss_fn_step1._resolve_thresholds()
-        torch_dtype = torch.float16 if self.device.type == "cuda" else torch.float32
-        target_edges = []
+        torch_dtype = means.dtype
+        raw_images = _normalize_reference_images(sample[("color", 0, 0)])
+        selected_i2i_images = []
         for cam_idx in step1_cam_indices:
-            i2i_images = i2i_images_by_cam[cam_idx]
-            batch = _images_to_tensor(i2i_images, self.device, torch_dtype)
-            edges = _soft_canny(
-                batch,
-                step1_cfg.edge_loss.sigma,
+            reference = _images_to_tensor(
+                [raw_images[cam_idx]], self.device, torch_dtype
+            )
+            ref_edges = _soft_canny(
+                reference,
+                step1_cfg.edge_select.sigma,
                 ref_low,
                 ref_high,
-                step1_cfg.edge_loss.soft_k,
+                step1_cfg.edge_select.soft_k,
             )
-            target_edges.append(edges.mean(dim=0))
-        target_edges_tensor = torch.stack(target_edges, dim=0)
+            best_score = None
+            best_image = None
+            for i2i_image in i2i_images_by_cam[cam_idx]:
+                candidate = _images_to_tensor(
+                    [i2i_image], self.device, torch_dtype
+                )
+                cand_edges = _soft_canny(
+                    candidate,
+                    step1_cfg.edge_select.sigma,
+                    ref_low,
+                    ref_high,
+                    step1_cfg.edge_select.soft_k,
+                )
+                score = F.l1_loss(cand_edges, ref_edges).item()
+                if best_score is None or score < best_score:
+                    best_score = score
+                    best_image = i2i_image
+            if best_image is None:
+                raise RuntimeError("Failed to select i2i image for step1.")
+            selected_i2i_images.append(best_image)
+        target_rgb_tensor = _images_to_tensor(
+            selected_i2i_images, self.device, torch_dtype
+        )
 
         sh_lr_step1 = (
             step1_cfg.training.sh_lr
@@ -584,7 +626,7 @@ class ClipGuidanceTrainer:
             initial_views = _build_base_views(
                 sample,
                 _resolve_cam_indices(CAM_ORDER),
-                step1_cfg.pose_jitter.background_color,
+                step1_cfg.background_color,
             )
             initial_renders = _render_views(
                 initial_views, means, rotations, scales, opacities, shs_init
@@ -596,21 +638,14 @@ class ClipGuidanceTrainer:
             rendered = _render_views(
                 step1_views, means, rotations, scales, opacities, shs
             )
-            edges_render = _soft_canny(
-                rendered,
-                step1_cfg.edge_loss.sigma,
-                render_low,
-                render_high,
-                step1_cfg.edge_loss.soft_k,
-            )
-            edge_loss = F.l1_loss(edges_render, target_edges_tensor)
-            edge_loss.backward()
+            rgb_loss = F.l1_loss(rendered, target_rgb_tensor)
+            rgb_loss.backward()
             optimizer_step1.step()
 
             if step % step1_cfg.training.log_every == 0 or step == 1:
                 print(
                     f"[clip-guidance step1] step={step:05d} "
-                    f"edge_l1={edge_loss.item():.4f}"
+                    f"rgb_l1={rgb_loss.item():.4f}"
                 )
 
             if (
