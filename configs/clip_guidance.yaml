@@ -36,10 +36,10 @@ pose_jitter:
 clip_loss:
   model_id: openai/clip-vit-base-patch32
   prompts:
-    - "sunset"
+    - "The sky turned to the evening before sunset."
   weight: 0.001
   image_size: null
-  seed: 0
+  seed: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   i2i_num_inference_steps: 20
   i2i_guidance_scale: 7.5
   i2i_image_guidance_scale: 1.5
