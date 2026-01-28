@@ -97,6 +97,8 @@ class ClipLoss:
         i2i_num_inference_steps: int = 20,
         i2i_guidance_scale: float = 7.5,
         i2i_image_guidance_scale: float = 1.5,
+        i2i_images: Optional[Sequence[Sequence[Image.Image]]] = None,
+        save_i2i: bool = True,
     ) -> None:
         if not prompts:
             raise ValueError("clip_loss.prompts must contain at least one prompt.")
@@ -121,6 +123,8 @@ class ClipLoss:
             i2i_num_inference_steps,
             i2i_guidance_scale,
             i2i_image_guidance_scale,
+            i2i_images,
+            save_i2i,
         )
 
     def _encode_images(self, images: torch.Tensor) -> torch.Tensor:
@@ -138,26 +142,31 @@ class ClipLoss:
         i2i_num_inference_steps: int,
         i2i_guidance_scale: float,
         i2i_image_guidance_scale: float,
+        i2i_images: Optional[Sequence[Sequence[Image.Image]]],
+        save_i2i: bool,
     ) -> dict[int, torch.Tensor]:
         target_features: dict[int, torch.Tensor] = {}
         torch_dtype = torch.float16 if self.device.type == "cuda" else torch.float32
         if isinstance(seed, list) and not seed:
             seed = None
         for cam_idx, image in enumerate(reference_images):
-            pil_image = to_pil_rgb(image)
-            edited = instruct_pix2pix_i2i(
-                image=pil_image,
-                prompt=prompt,
-                negative_prompt=None,
-                device=str(self.device),
-                torch_dtype=torch_dtype,
-                seed=seed,
-                num_inference_steps=i2i_num_inference_steps,
-                guidance_scale=i2i_guidance_scale,
-                image_guidance_scale=i2i_image_guidance_scale,
-            )
-            edited_images = edited if isinstance(edited, list) else [edited]
-            if output_dir:
+            if i2i_images is not None:
+                edited_images = list(i2i_images[cam_idx])
+            else:
+                pil_image = to_pil_rgb(image)
+                edited = instruct_pix2pix_i2i(
+                    image=pil_image,
+                    prompt=prompt,
+                    negative_prompt=None,
+                    device=str(self.device),
+                    torch_dtype=torch_dtype,
+                    seed=seed,
+                    num_inference_steps=i2i_num_inference_steps,
+                    guidance_scale=i2i_guidance_scale,
+                    image_guidance_scale=i2i_image_guidance_scale,
+                )
+                edited_images = edited if isinstance(edited, list) else [edited]
+            if output_dir and save_i2i:
                 cam_name = camera_names[cam_idx]
                 cam_dir = os.path.join(output_dir, "i2i", cam_name)
                 os.makedirs(cam_dir, exist_ok=True)

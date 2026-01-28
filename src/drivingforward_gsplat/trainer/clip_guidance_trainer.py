@@ -7,8 +7,11 @@ import random
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
+import numpy as np
 import torch
+import torch.nn.functional as F
 import yaml
+from PIL import Image
 
 from drivingforward_gsplat.clip_guidance.loss import (
     ClipLoss,
@@ -20,7 +23,9 @@ from drivingforward_gsplat.clip_guidance.loss import (
     ShRegConfig,
     ShRegLoss,
 )
+from drivingforward_gsplat.clip_guidance.loss.edge_loss import _soft_canny
 from drivingforward_gsplat.dataset import EnvNuScenesDataset, get_transforms
+from drivingforward_gsplat.i2i.instruct_pix2pix import instruct_pix2pix_i2i
 from drivingforward_gsplat.models.gaussian import rendering as gs_render
 from drivingforward_gsplat.predict_gaussian import (
     CAM_ORDER,
@@ -134,14 +139,31 @@ class OutputConfig:
 
 
 @dataclass
-class ClipGuidanceConfig:
-    predict: PredictConfig = field(default_factory=PredictConfig)
+class StepConfig:
     training: TrainingConfig = field(default_factory=TrainingConfig)
     pose_jitter: PoseJitterConfig = field(default_factory=PoseJitterConfig)
     clip_loss: ClipLossConfig = field(default_factory=ClipLossConfig)
     edge_loss: EdgeLossConfig = field(default_factory=EdgeLossConfig)
     sh_reg: ShRegConfig = field(default_factory=ShRegConfig)
     musiq_loss: MusiqLossConfig = field(default_factory=MusiqLossConfig)
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "StepConfig":
+        return cls(
+            training=TrainingConfig.from_dict(data.get("training", {})),
+            pose_jitter=PoseJitterConfig.from_dict(data.get("pose_jitter", {})),
+            clip_loss=ClipLossConfig.from_dict(data.get("clip_loss", {})),
+            edge_loss=EdgeLossConfig.from_dict(data.get("edge_loss", {})),
+            sh_reg=ShRegConfig.from_dict(data.get("sh_reg", {})),
+            musiq_loss=MusiqLossConfig.from_dict(data.get("musiq_loss", {})),
+        )
+
+
+@dataclass
+class ClipGuidanceConfig:
+    predict: PredictConfig = field(default_factory=PredictConfig)
+    step1: StepConfig = field(default_factory=StepConfig)
+    step2: StepConfig = field(default_factory=StepConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
 
     @classmethod
@@ -150,12 +172,8 @@ class ClipGuidanceConfig:
             data = yaml.safe_load(f) or {}
         return cls(
             predict=PredictConfig.from_dict(data.get("predict", {})),
-            training=TrainingConfig.from_dict(data.get("training", {})),
-            pose_jitter=PoseJitterConfig.from_dict(data.get("pose_jitter", {})),
-            clip_loss=ClipLossConfig.from_dict(data.get("clip_loss", {})),
-            edge_loss=EdgeLossConfig.from_dict(data.get("edge_loss", {})),
-            sh_reg=ShRegConfig.from_dict(data.get("sh_reg", {})),
-            musiq_loss=MusiqLossConfig.from_dict(data.get("musiq_loss", {})),
+            step1=StepConfig.from_dict(data.get("step1", {})),
+            step2=StepConfig.from_dict(data.get("step2", {})),
             output=OutputConfig.from_dict(data.get("output", {})),
         )
 
@@ -309,6 +327,105 @@ def _render_views(
     return torch.stack(rendered, dim=0)
 
 
+def _normalize_reference_images(
+    reference_images: torch.Tensor | Sequence,
+) -> List:
+    if torch.is_tensor(reference_images):
+        images = reference_images
+        if images.dim() == 5 and images.shape[0] == 1:
+            images = images.squeeze(0)
+        if images.dim() == 4:
+            return [images[idx] for idx in range(images.shape[0])]
+        if images.dim() == 3:
+            return [images]
+        raise ValueError(
+            "reference_images tensor must be 3D or 4D (optionally with batch)."
+        )
+    return list(reference_images)
+
+
+def _images_to_tensor(
+    images: Sequence,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    tensors = []
+    for image in images:
+        pil = to_pil_rgb(image)
+        arr = np.asarray(pil, dtype=np.float32) / 255.0
+        if arr.ndim == 2:
+            arr = np.repeat(arr[:, :, None], 3, axis=2)
+        if arr.shape[-1] != 3:
+            arr = arr[:, :, :3]
+        tensor = torch.from_numpy(arr).permute(2, 0, 1).contiguous()
+        tensors.append(tensor)
+    batch = torch.stack(tensors, dim=0).to(device=device, dtype=dtype)
+    return batch
+
+
+def _save_rendered_views(
+    output_dir: str,
+    views: Sequence[Dict],
+    rendered: torch.Tensor,
+    step_label: str,
+) -> None:
+    os.makedirs(output_dir, exist_ok=True)
+    for view, image in zip(views, rendered):
+        cam_name = CAM_ORDER[view["cam_idx"]]
+        render_path = os.path.join(output_dir, f"render_{step_label}_{cam_name}.png")
+        to_pil_rgb(image.detach()).save(render_path)
+
+
+def _generate_i2i_images(
+    reference_images: torch.Tensor | Sequence,
+    camera_names: Sequence[str],
+    prompt: str,
+    device: torch.device,
+    seed: Optional[int | list[int]],
+    output_dir: Optional[str],
+    num_inference_steps: int,
+    guidance_scale: float,
+    image_guidance_scale: float,
+) -> List[List[Image.Image]]:
+    images = _normalize_reference_images(reference_images)
+    if len(camera_names) < len(images):
+        raise ValueError("camera_names length must be >= number of reference images.")
+    torch_dtype = torch.float16 if device.type == "cuda" else torch.float32
+    if isinstance(seed, list) and not seed:
+        seed = None
+    i2i_images: List[List[Image.Image]] = []
+    for cam_idx, image in enumerate(images):
+        pil_image = to_pil_rgb(image)
+        edited = instruct_pix2pix_i2i(
+            image=pil_image,
+            prompt=prompt,
+            negative_prompt=None,
+            device=str(device),
+            torch_dtype=torch_dtype,
+            seed=seed,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            image_guidance_scale=image_guidance_scale,
+        )
+        edited_images = edited if isinstance(edited, list) else [edited]
+        if output_dir:
+            cam_name = camera_names[cam_idx]
+            cam_dir = os.path.join(output_dir, "i2i", cam_name)
+            os.makedirs(cam_dir, exist_ok=True)
+            if seed is None:
+                seeds = [None] * len(edited_images)
+            else:
+                seeds = seed if isinstance(seed, list) else [seed] * len(edited_images)
+            for idx, (img, seed_value) in enumerate(zip(edited_images, seeds)):
+                if seed_value is None:
+                    name = f"seed_none_{idx:02d}.png"
+                else:
+                    name = f"seed_{seed_value}.png"
+                img.save(os.path.join(cam_dir, name))
+        i2i_images.append(edited_images)
+    return i2i_images
+
+
 def _ensure_shs_layout(shs: torch.Tensor) -> torch.Tensor:
     if shs.dim() != 3:
         return shs
@@ -375,12 +492,13 @@ def _predict_initial_gaussians(
 class ClipGuidanceTrainer:
     def __init__(self, cfg: ClipGuidanceConfig) -> None:
         self.cfg = cfg
-        self.device = torch.device(cfg.training.device)
+        self.device = torch.device(cfg.step2.training.device)
 
     def train(self) -> None:
-        rng = random.Random(self.cfg.training.seed)
-        torch.manual_seed(self.cfg.training.seed)
+        step1_cfg = self.cfg.step1
+        step2_cfg = self.cfg.step2
 
+        torch.manual_seed(step1_cfg.training.seed)
         sample, gathered = _predict_initial_gaussians(self.cfg, self.device)
         means, rotations, scales, opacities, shs_init = gathered
         means = means.to(self.device)
@@ -390,71 +508,71 @@ class ClipGuidanceTrainer:
         shs_init = shs_init.to(self.device)
 
         shs = torch.nn.Parameter(shs_init.clone())
-        params = []
-        sh_lr = (
-            self.cfg.training.sh_lr
-            if self.cfg.training.sh_lr is not None
-            else self.cfg.training.lr
-        )
-        params.append({"params": [shs], "lr": sh_lr})
 
-        opacity_param = None
-        if self.cfg.training.optimize_opacity:
-            opacity_param = torch.nn.Parameter(opacities.clone())
-            opacities = opacity_param
-            opacity_lr = (
-                self.cfg.training.opacity_lr
-                if self.cfg.training.opacity_lr is not None
-                else self.cfg.training.lr
-            )
-            params.append({"params": [opacity_param], "lr": opacity_lr})
-
-        optimizer = torch.optim.Adam(params)
-
-        cam_indices = _resolve_cam_indices(self.cfg.pose_jitter.base_cameras)
-        base_views = _build_base_views(
-            sample, cam_indices, self.cfg.pose_jitter.background_color
-        )
-
-        clip_loss_fn = ClipLoss(
-            self.cfg.clip_loss.model_id,
-            self.cfg.clip_loss.prompts,
-            self.cfg.clip_loss.image_size,
-            self.device,
-            sample[("color", 0, 0)],
-            CAM_ORDER,
-            self.cfg.clip_loss.seed,
-            self.cfg.output.dir,
-            self.cfg.clip_loss.i2i_num_inference_steps,
-            self.cfg.clip_loss.i2i_guidance_scale,
-            self.cfg.clip_loss.i2i_image_guidance_scale,
-        )
-        edge_loss_fn = EdgeLoss(
-            sigma=self.cfg.edge_loss.sigma,
-            low_threshold=self.cfg.edge_loss.low_threshold,
-            high_threshold=self.cfg.edge_loss.high_threshold,
-            soft_k=self.cfg.edge_loss.soft_k,
-            render_low_threshold=self.cfg.edge_loss.render_low_threshold,
-            render_high_threshold=self.cfg.edge_loss.render_high_threshold,
-            ref_low_threshold=self.cfg.edge_loss.ref_low_threshold,
-            ref_high_threshold=self.cfg.edge_loss.ref_high_threshold,
-        )
-        musiq_loss_fn = None
-        if self.cfg.musiq_loss.weight > 0:
-            musiq_loss_fn = MusiqLoss(
-                self.cfg.musiq_loss.model_id,
-                self.cfg.musiq_loss.image_size,
-                self.device,
-            )
-        sh_reg_fn = ShRegLoss(
-            self.cfg.sh_reg.degree_weights,
-            self.cfg.sh_reg.norm,
-            self.device,
-        )
-
+        step1_dir = os.path.join(self.cfg.output.dir, "step1")
+        step2_dir = os.path.join(self.cfg.output.dir, "step2")
         os.makedirs(self.cfg.output.dir, exist_ok=True)
+        os.makedirs(step1_dir, exist_ok=True)
+        os.makedirs(step2_dir, exist_ok=True)
+
+        prompt = ", ".join(step1_cfg.clip_loss.prompts)
+        i2i_images_by_cam = _generate_i2i_images(
+            reference_images=sample[("color", 0, 0)],
+            camera_names=CAM_ORDER,
+            prompt=prompt,
+            device=self.device,
+            seed=step1_cfg.clip_loss.seed,
+            output_dir=self.cfg.output.dir,
+            num_inference_steps=step1_cfg.clip_loss.i2i_num_inference_steps,
+            guidance_scale=step1_cfg.clip_loss.i2i_guidance_scale,
+            image_guidance_scale=step1_cfg.clip_loss.i2i_image_guidance_scale,
+        )
+
+        step1_cam_indices = _resolve_cam_indices(step1_cfg.pose_jitter.base_cameras)
+        step1_views = _build_base_views(
+            sample, step1_cam_indices, step1_cfg.pose_jitter.background_color
+        )
+
+        edge_loss_fn_step1 = EdgeLoss(
+            sigma=step1_cfg.edge_loss.sigma,
+            low_threshold=step1_cfg.edge_loss.low_threshold,
+            high_threshold=step1_cfg.edge_loss.high_threshold,
+            soft_k=step1_cfg.edge_loss.soft_k,
+            render_low_threshold=step1_cfg.edge_loss.render_low_threshold,
+            render_high_threshold=step1_cfg.edge_loss.render_high_threshold,
+            ref_low_threshold=step1_cfg.edge_loss.ref_low_threshold,
+            ref_high_threshold=step1_cfg.edge_loss.ref_high_threshold,
+        )
+        (
+            render_low,
+            render_high,
+            ref_low,
+            ref_high,
+        ) = edge_loss_fn_step1._resolve_thresholds()
+        torch_dtype = torch.float16 if self.device.type == "cuda" else torch.float32
+        target_edges = []
+        for cam_idx in step1_cam_indices:
+            i2i_images = i2i_images_by_cam[cam_idx]
+            batch = _images_to_tensor(i2i_images, self.device, torch_dtype)
+            edges = _soft_canny(
+                batch,
+                step1_cfg.edge_loss.sigma,
+                ref_low,
+                ref_high,
+                step1_cfg.edge_loss.soft_k,
+            )
+            target_edges.append(edges.mean(dim=0))
+        target_edges_tensor = torch.stack(target_edges, dim=0)
+
+        sh_lr_step1 = (
+            step1_cfg.training.sh_lr
+            if step1_cfg.training.sh_lr is not None
+            else step1_cfg.training.lr
+        )
+        optimizer_step1 = torch.optim.Adam([{"params": [shs], "lr": sh_lr_step1}])
+
         if self.cfg.output.save_initial:
-            init_path = os.path.join(self.cfg.output.dir, "initial_inria.ply")
+            init_path = os.path.join(step1_dir, "initial_inria.ply")
             save_gaussians_tensors_as_inria_ply(
                 means.detach(),
                 rotations.detach(),
@@ -466,29 +584,169 @@ class ClipGuidanceTrainer:
             initial_views = _build_base_views(
                 sample,
                 _resolve_cam_indices(CAM_ORDER),
-                self.cfg.pose_jitter.background_color,
+                step1_cfg.pose_jitter.background_color,
             )
             initial_renders = _render_views(
                 initial_views, means, rotations, scales, opacities, shs_init
             )
-            for view, image in zip(initial_views, initial_renders):
-                cam_name = CAM_ORDER[view["cam_idx"]]
-                render_path = os.path.join(
-                    self.cfg.output.dir, f"render_initial_{cam_name}.png"
-                )
-                to_pil_rgb(image.detach()).save(render_path)
+            _save_rendered_views(step1_dir, initial_views, initial_renders, "initial")
 
-        for step in range(1, self.cfg.training.steps + 1):
+        for step in range(1, step1_cfg.training.steps + 1):
+            optimizer_step1.zero_grad(set_to_none=True)
+            rendered = _render_views(
+                step1_views, means, rotations, scales, opacities, shs
+            )
+            edges_render = _soft_canny(
+                rendered,
+                step1_cfg.edge_loss.sigma,
+                render_low,
+                render_high,
+                step1_cfg.edge_loss.soft_k,
+            )
+            edge_loss = F.l1_loss(edges_render, target_edges_tensor)
+            edge_loss.backward()
+            optimizer_step1.step()
+
+            if step % step1_cfg.training.log_every == 0 or step == 1:
+                print(
+                    f"[clip-guidance step1] step={step:05d} "
+                    f"edge_l1={edge_loss.item():.4f}"
+                )
+
+            if (
+                step1_cfg.training.save_every > 0
+                and step % step1_cfg.training.save_every == 0
+            ):
+                out_path = os.path.join(step1_dir, self.cfg.output.ply_name)
+                save_gaussians_tensors_as_inria_ply(
+                    means.detach(),
+                    rotations.detach(),
+                    scales.detach(),
+                    opacities.detach(),
+                    shs.detach(),
+                    out_path,
+                )
+
+            if (
+                self.cfg.output.save_renders_every > 0
+                and step % self.cfg.output.save_renders_every == 0
+            ):
+                _save_rendered_views(step1_dir, step1_views, rendered, f"{step:05d}")
+
+        final_path_step1 = os.path.join(step1_dir, self.cfg.output.ply_name)
+        save_gaussians_tensors_as_inria_ply(
+            means.detach(),
+            rotations.detach(),
+            scales.detach(),
+            opacities.detach(),
+            shs.detach(),
+            final_path_step1,
+        )
+        final_renders_step1 = _render_views(
+            step1_views, means, rotations, scales, opacities, shs
+        )
+        _save_rendered_views(step1_dir, step1_views, final_renders_step1, "final")
+
+        shs_step1 = shs.detach().clone()
+
+        torch.manual_seed(step2_cfg.training.seed)
+        rng = random.Random(step2_cfg.training.seed)
+
+        params = []
+        sh_lr = (
+            step2_cfg.training.sh_lr
+            if step2_cfg.training.sh_lr is not None
+            else step2_cfg.training.lr
+        )
+        params.append({"params": [shs], "lr": sh_lr})
+
+        opacity_param = None
+        if step2_cfg.training.optimize_opacity:
+            opacity_param = torch.nn.Parameter(opacities.clone())
+            opacities = opacity_param
+            opacity_lr = (
+                step2_cfg.training.opacity_lr
+                if step2_cfg.training.opacity_lr is not None
+                else step2_cfg.training.lr
+            )
+            params.append({"params": [opacity_param], "lr": opacity_lr})
+
+        optimizer = torch.optim.Adam(params)
+
+        cam_indices = _resolve_cam_indices(step2_cfg.pose_jitter.base_cameras)
+        base_views = _build_base_views(
+            sample, cam_indices, step2_cfg.pose_jitter.background_color
+        )
+
+        clip_loss_fn = ClipLoss(
+            step2_cfg.clip_loss.model_id,
+            step2_cfg.clip_loss.prompts,
+            step2_cfg.clip_loss.image_size,
+            self.device,
+            sample[("color", 0, 0)],
+            CAM_ORDER,
+            step2_cfg.clip_loss.seed,
+            self.cfg.output.dir,
+            step2_cfg.clip_loss.i2i_num_inference_steps,
+            step2_cfg.clip_loss.i2i_guidance_scale,
+            step2_cfg.clip_loss.i2i_image_guidance_scale,
+            i2i_images=i2i_images_by_cam,
+            save_i2i=False,
+        )
+        edge_loss_fn = EdgeLoss(
+            sigma=step2_cfg.edge_loss.sigma,
+            low_threshold=step2_cfg.edge_loss.low_threshold,
+            high_threshold=step2_cfg.edge_loss.high_threshold,
+            soft_k=step2_cfg.edge_loss.soft_k,
+            render_low_threshold=step2_cfg.edge_loss.render_low_threshold,
+            render_high_threshold=step2_cfg.edge_loss.render_high_threshold,
+            ref_low_threshold=step2_cfg.edge_loss.ref_low_threshold,
+            ref_high_threshold=step2_cfg.edge_loss.ref_high_threshold,
+        )
+        musiq_loss_fn = None
+        if step2_cfg.musiq_loss.weight > 0:
+            musiq_loss_fn = MusiqLoss(
+                step2_cfg.musiq_loss.model_id,
+                step2_cfg.musiq_loss.image_size,
+                self.device,
+            )
+        sh_reg_fn = ShRegLoss(
+            step2_cfg.sh_reg.degree_weights,
+            step2_cfg.sh_reg.norm,
+            self.device,
+        )
+
+        if self.cfg.output.save_initial:
+            init_path = os.path.join(step2_dir, "initial_inria.ply")
+            save_gaussians_tensors_as_inria_ply(
+                means.detach(),
+                rotations.detach(),
+                scales.detach(),
+                opacities.detach(),
+                shs.detach(),
+                init_path,
+            )
+            initial_views = _build_base_views(
+                sample,
+                _resolve_cam_indices(CAM_ORDER),
+                step2_cfg.pose_jitter.background_color,
+            )
+            initial_renders = _render_views(
+                initial_views, means, rotations, scales, opacities, shs
+            )
+            _save_rendered_views(step2_dir, initial_views, initial_renders, "initial")
+
+        for step in range(1, step2_cfg.training.steps + 1):
             optimizer.zero_grad(set_to_none=True)
 
             views = [
                 _sample_pose(
                     base_views[rng.randrange(len(base_views))],
-                    self.cfg.pose_jitter,
+                    step2_cfg.pose_jitter,
                     rng,
                     self.device,
                 )
-                for _ in range(self.cfg.pose_jitter.batch_size)
+                for _ in range(step2_cfg.pose_jitter.batch_size)
             ]
 
             rendered = _render_views(views, means, rotations, scales, opacities, shs)
@@ -505,16 +763,16 @@ class ClipGuidanceTrainer:
                 musiq_loss = musiq_loss_fn.compute(rendered)
 
             edge_loss = torch.tensor(0.0, device=self.device)
-            if self.cfg.edge_loss.weight > 0:
+            if step2_cfg.edge_loss.weight > 0:
                 edge_loss = edge_loss_fn.compute(rendered, rendered_init)
 
-            reg_loss = sh_reg_fn.compute(shs, shs_init)
+            reg_loss = sh_reg_fn.compute(shs, shs_step1)
 
             total = (
-                self.cfg.clip_loss.weight * clip_loss
-                + self.cfg.musiq_loss.weight * musiq_loss
-                + self.cfg.edge_loss.weight * edge_loss
-                + self.cfg.sh_reg.weight * reg_loss
+                step2_cfg.clip_loss.weight * clip_loss
+                + step2_cfg.musiq_loss.weight * musiq_loss
+                + step2_cfg.edge_loss.weight * edge_loss
+                + step2_cfg.sh_reg.weight * reg_loss
             )
             total.backward()
             optimizer.step()
@@ -522,29 +780,29 @@ class ClipGuidanceTrainer:
                 with torch.no_grad():
                     opacities.clamp_(1e-4, 1.0 - 1e-4)
 
-            if step % self.cfg.training.log_every == 0 or step == 1:
-                clip_w = self.cfg.clip_loss.weight * clip_loss
-                musiq_w = self.cfg.musiq_loss.weight * musiq_loss
-                edge_w = self.cfg.edge_loss.weight * edge_loss
-                sh_w = self.cfg.sh_reg.weight * reg_loss
+            if step % step2_cfg.training.log_every == 0 or step == 1:
+                clip_w = step2_cfg.clip_loss.weight * clip_loss
+                musiq_w = step2_cfg.musiq_loss.weight * musiq_loss
+                edge_w = step2_cfg.edge_loss.weight * edge_loss
+                sh_w = step2_cfg.sh_reg.weight * reg_loss
                 print(
-                    f"[clip-guidance] step={step:05d} "
+                    f"[clip-guidance step2] step={step:05d} "
                     f"total={total.item():.4f} "
-                    f"clip={clip_loss.item():.4f}*{self.cfg.clip_loss.weight:.4f}"
+                    f"clip={clip_loss.item():.4f}*{step2_cfg.clip_loss.weight:.4f}"
                     f"={clip_w.item():.4f} "
                     f"musiq_loss={musiq_loss.item():.4f}*"
-                    f"{self.cfg.musiq_loss.weight:.4f}={musiq_w.item():.4f} "
-                    f"edge={edge_loss.item():.4f}*{self.cfg.edge_loss.weight:.4f}"
+                    f"{step2_cfg.musiq_loss.weight:.4f}={musiq_w.item():.4f} "
+                    f"edge={edge_loss.item():.4f}*{step2_cfg.edge_loss.weight:.4f}"
                     f"={edge_w.item():.4f} "
-                    f"sh_reg={reg_loss.item():.4f}*{self.cfg.sh_reg.weight:.4f}"
+                    f"sh_reg={reg_loss.item():.4f}*{step2_cfg.sh_reg.weight:.4f}"
                     f"={sh_w.item():.4f}"
                 )
 
             if (
-                self.cfg.training.save_every > 0
-                and step % self.cfg.training.save_every == 0
+                step2_cfg.training.save_every > 0
+                and step % step2_cfg.training.save_every == 0
             ):
-                out_path = os.path.join(self.cfg.output.dir, self.cfg.output.ply_name)
+                out_path = os.path.join(step2_dir, self.cfg.output.ply_name)
                 save_gaussians_tensors_as_inria_ply(
                     means.detach(),
                     rotations.detach(),
@@ -558,16 +816,9 @@ class ClipGuidanceTrainer:
                 self.cfg.output.save_renders_every > 0
                 and step % self.cfg.output.save_renders_every == 0
             ):
-                render_path = os.path.join(
-                    self.cfg.output.dir, f"render_{step:05d}.png"
-                )
-                to_pil_rgb(rendered[0].detach()).save(render_path)
-                init_render_path = os.path.join(
-                    self.cfg.output.dir, f"render_init_{step:05d}.png"
-                )
-                to_pil_rgb(rendered_init[0].detach()).save(init_render_path)
+                _save_rendered_views(step2_dir, views, rendered, f"{step:05d}")
 
-        final_path = os.path.join(self.cfg.output.dir, self.cfg.output.ply_name)
+        final_path = os.path.join(step2_dir, self.cfg.output.ply_name)
         save_gaussians_tensors_as_inria_ply(
             means.detach(),
             rotations.detach(),
@@ -580,17 +831,12 @@ class ClipGuidanceTrainer:
         final_views = _build_base_views(
             sample,
             _resolve_cam_indices(CAM_ORDER),
-            self.cfg.pose_jitter.background_color,
+            step2_cfg.pose_jitter.background_color,
         )
         final_renders = _render_views(
             final_views, means, rotations, scales, opacities, shs
         )
-        for view, image in zip(final_views, final_renders):
-            cam_name = CAM_ORDER[view["cam_idx"]]
-            render_path = os.path.join(
-                self.cfg.output.dir, f"render_final_{cam_name}.png"
-            )
-            to_pil_rgb(image.detach()).save(render_path)
+        _save_rendered_views(step2_dir, final_views, final_renders, "final")
 
 
 def main() -> None:

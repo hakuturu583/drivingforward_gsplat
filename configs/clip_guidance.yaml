@@ -5,70 +5,106 @@ predict:
   torchscript_dir: torchscript
   novel_view_mode: MF
 
-training:
-  device: cuda
-  steps: 1000
-  # lr: 0.001
-  sh_lr: 0.005
-  opacity_lr: 0.0002
-  optimize_opacity: true
-  seed: 0
-  log_every: 10
-  save_every: 100
+step1:
+  training:
+    device: cuda
+    steps: 200
+    # lr: 0.001
+    sh_lr: 0.005
+    optimize_opacity: false
+    seed: 0
+    log_every: 10
+    save_every: 100
+  pose_jitter:
+    base_cameras:
+      - CAM_FRONT
+      - CAM_FRONT_RIGHT
+      - CAM_FRONT_LEFT
+      - CAM_BACK_RIGHT
+      - CAM_BACK_LEFT
+      - CAM_BACK
+    background_color:
+      - 1.0
+      - 1.0
+      - 1.0
+  clip_loss:
+    model_id: openai/clip-vit-base-patch32
+    prompts:
+      - "The sky turned to the evening before sunset."
+    seed: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    i2i_num_inference_steps: 20
+    i2i_guidance_scale: 7.5
+    i2i_image_guidance_scale: 1.5
+  edge_loss:
+    sigma: 0.4
+    low_threshold: 0.05
+    high_threshold: 0.12
+    render_low_threshold: 0.12
+    render_high_threshold: 0.2
+    ref_low_threshold: 0.1
+    ref_high_threshold: 0.2
+    soft_k: 5.0
 
-pose_jitter:
-  translation_m: 0.1
-  yaw_deg: 5.0
-  pitch_deg: 0.0
-  batch_size: 32
-  base_cameras:
-    - CAM_FRONT
-    - CAM_FRONT_RIGHT
-    - CAM_FRONT_LEFT
-    - CAM_BACK_RIGHT
-    - CAM_BACK_LEFT
-    - CAM_BACK
-  background_color:
-    - 1.0
-    - 1.0
-    - 1.0
-
-clip_loss:
-  model_id: openai/clip-vit-base-patch32
-  prompts:
-    - "The sky turned to the evening before sunset."
-  weight: 0.001
-  image_size: null
-  seed: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-  i2i_num_inference_steps: 20
-  i2i_guidance_scale: 7.5
-  i2i_image_guidance_scale: 1.5
-
-edge_loss:
-  weight: 0.1
-  sigma: 0.4
-  low_threshold: 0.05
-  high_threshold: 0.12
-  render_low_threshold: 0.12
-  render_high_threshold: 0.2
-  ref_low_threshold: 0.1
-  ref_high_threshold: 0.2
-  soft_k: 5.0
-
-sh_reg:
-  weight: 0.1
-  degree_weights:
-    - 0.2
-    - 0.5
-    - 1.0
-    - 2.0
-    - 3.0
-  norm: l2
-
-musiq_loss:
-  model_id: musiq
-  weight: 1.0
-  image_size: null
+step2:
+  training:
+    device: cuda
+    steps: 1000
+    # lr: 0.001
+    sh_lr: 0.005
+    opacity_lr: 0.0002
+    optimize_opacity: true
+    seed: 0
+    log_every: 10
+    save_every: 100
+  pose_jitter:
+    translation_m: 0.1
+    yaw_deg: 5.0
+    pitch_deg: 0.0
+    batch_size: 32
+    base_cameras:
+      - CAM_FRONT
+      - CAM_FRONT_RIGHT
+      - CAM_FRONT_LEFT
+      - CAM_BACK_RIGHT
+      - CAM_BACK_LEFT
+      - CAM_BACK
+    background_color:
+      - 1.0
+      - 1.0
+      - 1.0
+  clip_loss:
+    model_id: openai/clip-vit-base-patch32
+    prompts:
+      - "The sky turned to the evening before sunset."
+    weight: 0.001
+    image_size: null
+    seed: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    i2i_num_inference_steps: 20
+    i2i_guidance_scale: 7.5
+    i2i_image_guidance_scale: 1.5
+  edge_loss:
+    weight: 0.1
+    sigma: 0.4
+    low_threshold: 0.05
+    high_threshold: 0.12
+    render_low_threshold: 0.12
+    render_high_threshold: 0.2
+    ref_low_threshold: 0.1
+    ref_high_threshold: 0.2
+    soft_k: 5.0
+  sh_reg:
+    weight: 0.1
+    degree_weights:
+      - 0.2
+      - 0.5
+      - 1.0
+      - 2.0
+      - 3.0
+    norm: l2
+  musiq_loss:
+    model_id: musiq
+    weight: 1.0
+    image_size: null
 
 output:
   dir: output/clip_guidance
