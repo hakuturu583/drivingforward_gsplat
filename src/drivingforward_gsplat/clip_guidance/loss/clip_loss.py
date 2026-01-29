@@ -23,10 +23,6 @@ class ClipLossConfig:
     prompts: List[str] = field(default_factory=list)
     weight: float = 1.0
     image_size: Optional[int] = None
-    seed: Optional[int | list[int]] = None
-    i2i_num_inference_steps: int = 20
-    i2i_guidance_scale: float = 7.5
-    i2i_image_guidance_scale: float = 1.5
 
     @classmethod
     def from_dict(cls, data: dict) -> "ClipLossConfig":
@@ -34,26 +30,11 @@ class ClipLossConfig:
         prompts = data.get("prompts", defaults.prompts)
         if isinstance(prompts, str):
             prompts = [prompts]
-        seed = data.get("seed", defaults.seed)
-        if isinstance(seed, list):
-            seed = [int(item) for item in seed]
-        elif isinstance(seed, (int, float)):
-            seed = int(seed)
         return cls(
             model_id=data.get("model_id", defaults.model_id),
             prompts=list(prompts),
             weight=float(data.get("weight", defaults.weight)),
             image_size=data.get("image_size", defaults.image_size),
-            seed=seed,
-            i2i_num_inference_steps=int(
-                data.get("i2i_num_inference_steps", defaults.i2i_num_inference_steps)
-            ),
-            i2i_guidance_scale=float(
-                data.get("i2i_guidance_scale", defaults.i2i_guidance_scale)
-            ),
-            i2i_image_guidance_scale=float(
-                data.get("i2i_image_guidance_scale", defaults.i2i_image_guidance_scale)
-            ),
         )
 
 

@@ -96,6 +96,42 @@ class TrainingConfig:
 
 
 @dataclass
+class I2IConfig:
+    model_id: str = "openai/clip-vit-base-patch32"
+    prompts: List[str] = field(default_factory=list)
+    seed: Optional[int | list[int]] = None
+    i2i_num_inference_steps: int = 20
+    i2i_guidance_scale: float = 7.5
+    i2i_image_guidance_scale: float = 1.5
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "I2IConfig":
+        defaults = cls()
+        prompts = data.get("prompts", defaults.prompts)
+        if isinstance(prompts, str):
+            prompts = [prompts]
+        seed = data.get("seed", defaults.seed)
+        if isinstance(seed, list):
+            seed = [int(item) for item in seed]
+        elif isinstance(seed, (int, float)):
+            seed = int(seed)
+        return cls(
+            model_id=data.get("model_id", defaults.model_id),
+            prompts=list(prompts),
+            seed=seed,
+            i2i_num_inference_steps=int(
+                data.get("i2i_num_inference_steps", defaults.i2i_num_inference_steps)
+            ),
+            i2i_guidance_scale=float(
+                data.get("i2i_guidance_scale", defaults.i2i_guidance_scale)
+            ),
+            i2i_image_guidance_scale=float(
+                data.get("i2i_image_guidance_scale", defaults.i2i_image_guidance_scale)
+            ),
+        )
+
+
+@dataclass
 class PoseJitterConfig:
     translation_m: float = 1.0
     yaw_deg: float = 360.0
@@ -141,7 +177,7 @@ class OutputConfig:
 @dataclass
 class Step1Config:
     training: TrainingConfig = field(default_factory=TrainingConfig)
-    i2i: ClipLossConfig = field(default_factory=ClipLossConfig)
+    i2i: I2IConfig = field(default_factory=I2IConfig)
     edge_select: EdgeLossConfig = field(default_factory=EdgeLossConfig)
     background_color: List[float] = field(default_factory=lambda: [1.0, 1.0, 1.0])
 
@@ -149,7 +185,7 @@ class Step1Config:
     def from_dict(cls, data: Dict) -> "Step1Config":
         return cls(
             training=TrainingConfig.from_dict(data.get("training", {})),
-            i2i=ClipLossConfig.from_dict(data.get("i2i", {})),
+            i2i=I2IConfig.from_dict(data.get("i2i", {})),
             edge_select=EdgeLossConfig.from_dict(data.get("edge_select", {})),
             background_color=list(data.get("background_color", cls().background_color)),
         )
@@ -716,11 +752,7 @@ class ClipGuidanceTrainer:
             self.device,
             sample[("color", 0, 0)],
             CAM_ORDER,
-            step2_cfg.clip_loss.seed,
-            self.cfg.output.dir,
-            step2_cfg.clip_loss.i2i_num_inference_steps,
-            step2_cfg.clip_loss.i2i_guidance_scale,
-            step2_cfg.clip_loss.i2i_image_guidance_scale,
+            output_dir=self.cfg.output.dir,
             i2i_images=i2i_images_by_cam,
             save_i2i=False,
         )
