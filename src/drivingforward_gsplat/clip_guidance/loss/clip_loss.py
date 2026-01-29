@@ -100,8 +100,11 @@ class ClipLoss:
         i2i_images: Optional[Sequence[Sequence[Image.Image]]] = None,
         save_i2i: bool = True,
     ) -> None:
-        if not prompts:
-            raise ValueError("clip_loss.prompts must contain at least one prompt.")
+        if not prompts and i2i_images is None:
+            raise ValueError(
+                "clip_loss.prompts must contain at least one prompt when i2i_images "
+                "is not provided."
+            )
         self.device = device
         self.model = CLIPModel.from_pretrained(model_id).to(device)
         self.model.eval()
@@ -110,7 +113,7 @@ class ClipLoss:
             if image_size is not None
             else int(self.model.config.vision_config.image_size)
         )
-        prompt = ", ".join(prompts)
+        prompt = ", ".join(prompts) if prompts else ""
         reference_images, camera_names = self._normalize_reference_inputs(
             reference_images, camera_names
         )
@@ -149,6 +152,11 @@ class ClipLoss:
         torch_dtype = torch.float16 if self.device.type == "cuda" else torch.float32
         if isinstance(seed, list) and not seed:
             seed = None
+        if i2i_images is None and not prompt:
+            raise ValueError(
+                "clip_loss.prompts must contain at least one prompt when i2i_images "
+                "is not provided."
+            )
         for cam_idx, image in enumerate(reference_images):
             if i2i_images is not None:
                 edited_images = list(i2i_images[cam_idx])

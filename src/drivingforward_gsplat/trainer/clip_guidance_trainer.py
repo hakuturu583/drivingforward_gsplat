@@ -151,9 +151,7 @@ class Step1Config:
             training=TrainingConfig.from_dict(data.get("training", {})),
             i2i=ClipLossConfig.from_dict(data.get("i2i", {})),
             edge_select=EdgeLossConfig.from_dict(data.get("edge_select", {})),
-            background_color=list(
-                data.get("background_color", cls().background_color)
-            ),
+            background_color=list(data.get("background_color", cls().background_color)),
         )
 
 
@@ -585,9 +583,7 @@ class ClipGuidanceTrainer:
             best_score = None
             best_image = None
             for i2i_image in i2i_images_by_cam[cam_idx]:
-                candidate = _images_to_tensor(
-                    [i2i_image], self.device, torch_dtype
-                )
+                candidate = _images_to_tensor([i2i_image], self.device, torch_dtype)
                 cand_edges = _soft_canny(
                     candidate,
                     step1_cfg.edge_select.sigma,
